@@ -3,7 +3,8 @@ import copy
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTableWidget, QTableWidgetItem, QPushButton, QComboBox, 
-    QLabel, QSpinBox, QHeaderView, QGroupBox, QTextEdit, QFileDialog
+    QLabel, QSpinBox, QHeaderView, QGroupBox, QTextEdit, QFileDialog,
+    QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt
 
@@ -26,7 +27,7 @@ class Process:
         self.remaining_time = burst_time
 
 # ==============================================================================
-# 2. SCHEDULER ENGINE WITH LOG LOGIC LOOPS
+# 2. SCHEDULER ENGINE WITH LOG LOGIC LOOPS (INCLUDING HRRN)
 # ==============================================================================
 class CPUSchedulerEngine:
     @staticmethod
@@ -50,7 +51,7 @@ class CPUSchedulerEngine:
             p.turnaround_time = p.completion_time - p.arrival_time
             p.waiting_time = p.turnaround_time - p.burst_time
             gantt.append((p.pid, start, current_time))
-            logs.append(f"[Time {current_time}]: Process {p.pid} terminated (Completetion={p.completion_time}, WT={p.waiting_time}).")
+            logs.append(f"[Time {current_time}]: Process {p.pid} terminated (Completion={p.completion_time}, WT={p.waiting_time}).")
             
         return procs, gantt, logs
 
@@ -195,14 +196,16 @@ class CPUSchedulerEngine:
         return procs, gantt, logs
 
     @staticmethod
-    def run_priority_non_preemptive(processes):
+    def run_priority_non_preemptive(processes, reverse_priority=False):
         procs = [copy.deepcopy(p) for p in processes]
         gantt = []
         logs = []
         current_time = 0
         completed = []
         
-        logs.append(f"[Time 0]: Non-Preemptive Priority scheduler initialized.")
+        mode_str = "Higher Value = Higher Priority" if reverse_priority else "Lower Value = Higher Priority"
+        logs.append(f"[Time 0]: Non-Preemptive Priority scheduler initialized ({mode_str}).")
+        
         while len(completed) < len(processes):
             available = [p for p in procs if p.arrival_time <= current_time and p not in completed]
             
@@ -211,10 +214,15 @@ class CPUSchedulerEngine:
                 gantt.append(("IDLE", current_time, next_proc.arrival_time))
                 current_time = next_proc.arrival_time
                 continue
+            
+            # Sort matching user priority configuration rule
+            if reverse_priority:
+                chosen = max(available, key=lambda x: (x.priority, -x.arrival_time))
+            else:
+                chosen = min(available, key=lambda x: (x.priority, x.arrival_time))
                 
-            chosen = min(available, key=lambda x: x.priority)
             start = current_time
-            logs.append(f"[Time {start}]: Executing Process {chosen.pid} based on highest priority metric ({chosen.priority}).")
+            logs.append(f"[Time {start}]: Executing Process {chosen.pid} based on requested priority metric rules ({chosen.priority}).")
             current_time += chosen.burst_time
             
             chosen.completion_time = current_time
@@ -228,7 +236,7 @@ class CPUSchedulerEngine:
         return procs, gantt, logs
 
     @staticmethod
-    def run_priority_preemptive(processes):
+    def run_priority_preemptive(processes, reverse_priority=False):
         procs = [copy.deepcopy(p) for p in processes]
         gantt = []
         logs = []
@@ -238,7 +246,9 @@ class CPUSchedulerEngine:
         last_pid = None
         block_start = 0
         
-        logs.append(f"[Time 0]: Preemptive Priority Scheduling core active.")
+        mode_str = "Higher Value = Higher Priority" if reverse_priority else "Lower Value = Higher Priority"
+        logs.append(f"[Time 0]: Preemptive Priority Scheduling core active ({mode_str}).")
+        
         while completed_count < n:
             available = [p for p in procs if p.arrival_time <= current_time and p.remaining_time > 0]
             
@@ -250,13 +260,17 @@ class CPUSchedulerEngine:
                 gantt.append(("IDLE", current_time, next_arrival))
                 current_time = next_arrival
                 continue
-                
-            chosen = min(available, key=lambda x: (x.priority, x.arrival_time))
+            
+            # Select matching rule matching user configuration settings
+            if reverse_priority:
+                chosen = max(available, key=lambda x: (x.priority, -x.arrival_time))
+            else:
+                chosen = min(available, key=lambda x: (x.priority, x.arrival_time))
             
             if chosen.pid != last_pid:
                 if last_pid is not None:
                     gantt.append((last_pid, block_start, current_time))
-                    logs.append(f"[Time {current_time}]: Preemption via priority priority shift! Process {chosen.pid} took core from {last_pid}.")
+                    logs.append(f"[Time {current_time}]: Preemption via priority shift! Process {chosen.pid} took core from {last_pid}.")
                 last_pid = chosen.pid
                 block_start = current_time
                 
@@ -275,6 +289,53 @@ class CPUSchedulerEngine:
                 
         return procs, gantt, logs
 
+    @staticmethod
+    def run_hrrn(processes):
+        """Highest Response Ratio Next (HRRN) Scheduling Logic Loop"""
+        procs = [copy.deepcopy(p) for p in processes]
+        gantt = []
+        logs = []
+        current_time = 0
+        completed = []
+        
+        logs.append(f"[Time 0]: Highest Response Ratio Next (HRRN) Engine online.")
+        while len(completed) < len(processes):
+            available = [p for p in procs if p.arrival_time <= current_time and p not in completed]
+            
+            if not available:
+                next_proc = min([p for p in procs if p not in completed], key=lambda x: x.arrival_time)
+                gantt.append(("IDLE", current_time, next_proc.arrival_time))
+                logs.append(f"[Time {current_time}]: CPU IDLE. Advancing clock directly to next process arrival at {next_proc.arrival_time}.")
+                current_time = next_proc.arrival_time
+                continue
+                
+            logs.append(f"[Time {current_time}]: Evaluating Response Ratios for active jobs:")
+            highest_ratio = -1
+            chosen = None
+            
+            for p in available:
+                wait_time = current_time - p.arrival_time
+                ratio = (wait_time + p.burst_time) / p.burst_time
+                logs.append(f" -> Process {p.pid}: Wait={wait_time}, Burst={p.burst_time} => Response Ratio = {ratio:.2f}")
+                
+                if ratio > highest_ratio:
+                    highest_ratio = ratio
+                    chosen = p
+            
+            start = current_time
+            logs.append(f"[Time {start}]: Dispatched Process {chosen.pid} with the Highest Response Ratio ({highest_ratio:.2f}).")
+            
+            current_time += chosen.burst_time
+            chosen.completion_time = current_time
+            chosen.turnaround_time = chosen.completion_time - chosen.arrival_time
+            chosen.waiting_time = chosen.turnaround_time - chosen.burst_time
+            
+            gantt.append((chosen.pid, start, current_time))
+            completed.append(chosen)
+            logs.append(f"[Time {current_time}]: Non-preemptive block finished for Process {chosen.pid}.")
+            
+        return procs, gantt, logs
+
 # ==============================================================================
 # 3. INTERACTIVE DASHBOARD SYSTEM
 # ==============================================================================
@@ -284,7 +345,6 @@ class SimulationDashboard(QMainWindow):
         self.setWindowTitle("Cosmos College - Interactive CPU Scheduler Dashboard")
         self.resize(1200, 800)
         
-        # Comprehensive analytical cache initialized
         self.last_sim_results = None
         self.last_algo_used = ""
         
@@ -300,17 +360,33 @@ class SimulationDashboard(QMainWindow):
         self.algo_combo = QComboBox()
         self.algo_combo.addItems([
             "FCFS", "SJF (Non-Preemptive)", "SJF (Preemptive)", 
-            "Round Robin", "Priority (Non-Preemptive)", "Priority (Preemptive)"
+            "Round Robin", "Priority (Non-Preemptive)", "Priority (Preemptive)",
+            "Highest Response Ratio Next (HRRN)"
         ])
         self.algo_combo.currentTextChanged.connect(self.toggle_inputs)
         config_layout.addWidget(self.algo_combo)
         
+        # Round Robin Inputs
         self.lbl_quantum = QLabel("Time Quantum:")
         config_layout.addWidget(self.lbl_quantum)
         self.quantum_spin = QSpinBox()
         self.quantum_spin.setRange(1, 20)
         self.quantum_spin.setValue(2)
         config_layout.addWidget(self.quantum_spin)
+        
+        # Priority Radio Selection Logic Setup (Ascending vs Descending Sort)
+        self.lbl_priority_rule = QLabel("Priority Order:")
+        self.radio_low_high = QRadioButton("Lower # = Higher Priority")
+        self.radio_high_low = QRadioButton("Higher # = Higher Priority")
+        self.radio_low_high.setChecked(True)
+        
+        self.priority_group = QButtonGroup(self)
+        self.priority_group.addButton(self.radio_low_high)
+        self.priority_group.addButton(self.radio_high_low)
+        
+        config_layout.addWidget(self.lbl_priority_rule)
+        config_layout.addWidget(self.radio_low_high)
+        config_layout.addWidget(self.radio_high_low)
         
         self.btn_run = QPushButton("Execute Simulation")
         self.btn_run.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; padding: 6px;")
@@ -344,11 +420,11 @@ class SimulationDashboard(QMainWindow):
         self.input_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
         default_data = [
-            ("P1", "0", "8", "3"),
-            ("P2", "1", "4", "1"),
-            ("P3", "2", "9", "4"),
-            ("P4", "3", "5", "2"),
-            ("P5", "4", "2", "5")
+            ("P1", "0", "3", "1"),
+            ("P2", "2", "6", "3"),
+            ("P3", "4", "4", "2"),
+            ("P4", "6", "5", "5"),
+            ("P5", "8", "2", "4")
         ]
         for row, data in enumerate(default_data):
             for col, val in enumerate(data):
@@ -369,9 +445,11 @@ class SimulationDashboard(QMainWindow):
         
         output_box = QGroupBox("Analytics & Performance Metrics")
         output_layout = QVBoxLayout()
-        self.output_table = QTableWidget(0, 6)
+        
+        # Updated output table to include Optional Priority column mapping (7 columns total)
+        self.output_table = QTableWidget(0, 7)
         self.output_table.setHorizontalHeaderLabels([
-            "Process ID", "Arrival Time", "Burst Time", "Completion Time", "Turnaround Time", "Waiting Time"
+            "Process ID", "Arrival Time", "Burst Time", "Priority", "Completion Time", "Turnaround Time", "Waiting Time"
         ])
         self.output_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         output_layout.addWidget(self.output_table)
@@ -396,9 +474,26 @@ class SimulationDashboard(QMainWindow):
         self.toggle_inputs()
         
     def toggle_inputs(self):
-        is_rr = self.algo_combo.currentText() == "Round Robin"
+        algo = self.algo_combo.currentText()
+        is_rr = (algo == "Round Robin")
+        is_priority_algo = "Priority" in algo
+        
+        # Toggle Time Quantum Visibility
         self.lbl_quantum.setVisible(is_rr)
         self.quantum_spin.setVisible(is_rr)
+        
+        # Toggle Priority Sorting Order Radio Options Visibility
+        self.lbl_priority_rule.setVisible(is_priority_algo)
+        self.radio_low_high.setVisible(is_priority_algo)
+        self.radio_high_low.setVisible(is_priority_algo)
+        
+        # Dynamic Column Filtering: Priority column is Index 3 on input_table and Index 3 on output_table
+        if is_priority_algo:
+            self.input_table.setColumnHidden(3, False)
+            self.output_table.setColumnHidden(3, False)
+        else:
+            self.input_table.setColumnHidden(3, True)
+            self.output_table.setColumnHidden(3, True)
 
     def add_process_row(self):
         row_idx = self.input_table.rowCount()
@@ -406,7 +501,7 @@ class SimulationDashboard(QMainWindow):
         self.input_table.setItem(row_idx, 0, QTableWidgetItem(f"P{row_idx+1}"))
         self.input_table.setItem(row_idx, 1, QTableWidgetItem("0"))
         self.input_table.setItem(row_idx, 2, QTableWidgetItem("5"))
-        self.input_table.setItem(row_idx, 3, QTableWidgetItem("0"))
+        self.input_table.setItem(row_idx, 3, QTableWidgetItem("1"))
 
     def remove_process_row(self):
         curr_row = self.input_table.currentRow()
@@ -422,7 +517,11 @@ class SimulationDashboard(QMainWindow):
                 pid = self.input_table.item(row, 0).text()
                 arr = int(self.input_table.item(row, 1).text())
                 burst = int(self.input_table.item(row, 2).text())
-                priority = int(self.input_table.item(row, 3).text() or 0)
+                
+                # Check priority item text safely, default to 0 if hidden/empty
+                priority_item = self.input_table.item(row, 3)
+                priority = int(priority_item.text() if (priority_item and priority_item.text()) else 0)
+                
                 processes.append(Process(pid, arr, burst, priority))
             except (ValueError, AttributeError):
                 continue
@@ -432,6 +531,9 @@ class SimulationDashboard(QMainWindow):
 
         algo = self.algo_combo.currentText()
         self.last_algo_used = algo
+        
+        # Read user choice for radio priority order orientation
+        reverse_priority = self.radio_high_low.isChecked()
         
         if algo == "FCFS":
             results, gantt, logs = CPUSchedulerEngine.run_fcfs(processes)
@@ -443,9 +545,15 @@ class SimulationDashboard(QMainWindow):
             results, gantt, logs = CPUSchedulerEngine.run_round_robin(processes, self.quantum_spin.value())
             self.last_algo_used += f" (Quantum={self.quantum_spin.value()})"
         elif algo == "Priority (Non-Preemptive)":
-            results, gantt, logs = CPUSchedulerEngine.run_priority_non_preemptive(processes)
+            results, gantt, logs = CPUSchedulerEngine.run_priority_non_preemptive(processes, reverse_priority)
+            mode_desc = "Higher Value Wins" if reverse_priority else "Lower Value Wins"
+            self.last_algo_used += f" ({mode_desc})"
         elif algo == "Priority (Preemptive)":
-            results, gantt, logs = CPUSchedulerEngine.run_priority_preemptive(processes)
+            results, gantt, logs = CPUSchedulerEngine.run_priority_preemptive(processes, reverse_priority)
+            mode_desc = "Higher Value Wins" if reverse_priority else "Lower Value Wins"
+            self.last_algo_used += f" ({mode_desc})"
+        elif algo == "Highest Response Ratio Next (HRRN)":
+            results, gantt, logs = CPUSchedulerEngine.run_hrrn(processes)
 
         self.last_sim_results = results
 
@@ -459,9 +567,10 @@ class SimulationDashboard(QMainWindow):
             self.output_table.setItem(row, 0, QTableWidgetItem(str(p.pid)))
             self.output_table.setItem(row, 1, QTableWidgetItem(str(p.arrival_time)))
             self.output_table.setItem(row, 2, QTableWidgetItem(str(p.burst_time)))
-            self.output_table.setItem(row, 3, QTableWidgetItem(str(p.completion_time)))
-            self.output_table.setItem(row, 4, QTableWidgetItem(str(p.turnaround_time)))
-            self.output_table.setItem(row, 5, QTableWidgetItem(str(p.waiting_time)))
+            self.output_table.setItem(row, 3, QTableWidgetItem(str(p.priority)))
+            self.output_table.setItem(row, 4, QTableWidgetItem(str(p.completion_time)))
+            self.output_table.setItem(row, 5, QTableWidgetItem(str(p.turnaround_time)))
+            self.output_table.setItem(row, 6, QTableWidgetItem(str(p.waiting_time)))
             tot_wt += p.waiting_time
             tot_tat += p.turnaround_time
             
@@ -503,12 +612,20 @@ class SimulationDashboard(QMainWindow):
                 f.write(f"Algorithm Evaluated: {self.last_algo_used}\n")
                 f.write(f"Total Process Workload: {len(self.last_sim_results)} processes\n\n")
                 f.write("------------------------------------------------------------------------\n")
-                f.write("PID\tArrival\tBurst\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
+                
+                if "Priority" in self.last_algo_used:
+                    f.write("PID\tArrival\tBurst\tPriority\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
+                else:
+                    f.write("PID\tArrival\tBurst\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
+                    
                 f.write("------------------------------------------------------------------------\n")
                 
                 tot_wt, tot_tat = 0, 0
                 for p in self.last_sim_results:
-                    f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
+                    if "Priority" in self.last_algo_used:
+                        f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.priority}\t\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
+                    else:
+                        f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
                     tot_wt += p.waiting_time
                     tot_tat += p.turnaround_time
                     
