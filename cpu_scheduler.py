@@ -6,7 +6,8 @@ from PyQt6.QtWidgets import (
     QLabel, QSpinBox, QHeaderView, QGroupBox, QTextEdit, QFileDialog,
     QRadioButton, QButtonGroup
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 
 # ==============================================================================
 # 1. CORE OBJECT MODELS AND DATA CONTRACTS
@@ -27,7 +28,7 @@ class Process:
         self.remaining_time = burst_time
 
 # ==============================================================================
-# 2. SCHEDULER ENGINE WITH LOG LOGIC LOOPS (INCLUDING HRRN)
+# 2. SCHEDULER ENGINE WITH LOG LOGIC LOOPS
 # ==============================================================================
 class CPUSchedulerEngine:
     @staticmethod
@@ -51,7 +52,7 @@ class CPUSchedulerEngine:
             p.turnaround_time = p.completion_time - p.arrival_time
             p.waiting_time = p.turnaround_time - p.burst_time
             gantt.append((p.pid, start, current_time))
-            logs.append(f"[Time {current_time}]: Process {p.pid} terminated (Completion={p.completion_time}, WT={p.waiting_time}).")
+            logs.append(f"[Time {current_time}]: Process {p.pid} terminated.")
             
         return procs, gantt, logs
 
@@ -70,13 +71,12 @@ class CPUSchedulerEngine:
             if not available:
                 next_proc = min([p for p in procs if p not in completed], key=lambda x: x.arrival_time)
                 gantt.append(("IDLE", current_time, next_proc.arrival_time))
-                logs.append(f"[Time {current_time}]: CPU IDLE. Advancing time to next arrival at {next_proc.arrival_time}.")
                 current_time = next_proc.arrival_time
                 continue
                 
             chosen = min(available, key=lambda x: x.burst_time)
             start = current_time
-            logs.append(f"[Time {start}]: Selecting Process {chosen.pid} (Burst={chosen.burst_time}) out of {len(available)} ready jobs.")
+            logs.append(f"[Time {start}]: Selecting Process {chosen.pid} (Burst={chosen.burst_time}).")
             current_time += chosen.burst_time
             
             chosen.completion_time = current_time
@@ -85,7 +85,7 @@ class CPUSchedulerEngine:
             
             gantt.append((chosen.pid, start, current_time))
             completed.append(chosen)
-            logs.append(f"[Time {current_time}]: Process {chosen.pid} completed execution loop.")
+            logs.append(f"[Time {current_time}]: Process {chosen.pid} completed execution.")
             
         return procs, gantt, logs
 
@@ -110,7 +110,6 @@ class CPUSchedulerEngine:
                     last_pid = None
                 next_arrival = min([p.arrival_time for p in procs if p.remaining_time > 0])
                 gantt.append(("IDLE", current_time, next_arrival))
-                logs.append(f"[Time {current_time}]: Ready queue empty. CPU idling.")
                 current_time = next_arrival
                 continue
                 
@@ -119,9 +118,7 @@ class CPUSchedulerEngine:
             if chosen.pid != last_pid:
                 if last_pid is not None:
                     gantt.append((last_pid, block_start, current_time))
-                    logs.append(f"[Time {current_time}]: Preemption event! Context switching from Process {last_pid} to Process {chosen.pid}.")
-                else:
-                    logs.append(f"[Time {current_time}]: Loading Process {chosen.pid} into active CPU core.")
+                    logs.append(f"[Time {current_time}]: Preemption! Context switch from {last_pid} to {chosen.pid}.")
                 last_pid = chosen.pid
                 block_start = current_time
                 
@@ -135,7 +132,7 @@ class CPUSchedulerEngine:
                 chosen.turnaround_time = chosen.completion_time - chosen.arrival_time
                 chosen.waiting_time = chosen.turnaround_time - chosen.burst_time
                 completed_count += 1
-                logs.append(f"[Time {current_time}]: Process {chosen.pid} fully calculated and closed out.")
+                logs.append(f"[Time {current_time}]: Process {chosen.pid} fully closed out.")
                 block_start = current_time
                 
         return procs, gantt, logs
@@ -157,7 +154,7 @@ class CPUSchedulerEngine:
                 if p.arrival_time <= current_time and not visited[i] and p.remaining_time > 0:
                     ready_queue.append(procs[i])
                     visited[i] = True
-                    logs.append(f"[Time {current_time}]: Process {p.pid} arrived and added to FIFO queue.")
+                    logs.append(f"[Time {current_time}]: Process {p.pid} added to ready queue.")
 
         check_new_arrivals()
         
@@ -173,7 +170,6 @@ class CPUSchedulerEngine:
                 
             curr_p = ready_queue.pop(0)
             start = current_time
-            logs.append(f"[Time {start}]: Allocating CPU to Process {curr_p.pid} (Remaining={curr_p.remaining_time}).")
             
             if curr_p.remaining_time > time_quantum:
                 curr_p.remaining_time -= time_quantum
@@ -181,7 +177,6 @@ class CPUSchedulerEngine:
                 check_new_arrivals()
                 ready_queue.append(curr_p)
                 gantt.append((curr_p.pid, start, current_time))
-                logs.append(f"[Time {current_time}]: Quantum expired. Interrupted Process {curr_p.pid} moved to queue tail.")
             else:
                 current_time += curr_p.remaining_time
                 curr_p.remaining_time = 0
@@ -190,7 +185,6 @@ class CPUSchedulerEngine:
                 curr_p.waiting_time = curr_p.turnaround_time - curr_p.burst_time
                 completed_count += 1
                 gantt.append((curr_p.pid, start, current_time))
-                logs.append(f"[Time {current_time}]: Process {curr_p.pid} finished completely.")
                 check_new_arrivals()
                 
         return procs, gantt, logs
@@ -203,26 +197,24 @@ class CPUSchedulerEngine:
         current_time = 0
         completed = []
         
-        mode_str = "Higher Value = Higher Priority" if reverse_priority else "Lower Value = Higher Priority"
-        logs.append(f"[Time 0]: Non-Preemptive Priority scheduler initialized ({mode_str}).")
-        
+        logs.append(f"[Time 0]: Priority (Non-Preemptive) Engine initialized. Mode: {'Higher value = Higher priority' if reverse_priority else 'Lower value = Higher priority'}.")
         while len(completed) < len(processes):
             available = [p for p in procs if p.arrival_time <= current_time and p not in completed]
             
             if not available:
                 next_proc = min([p for p in procs if p not in completed], key=lambda x: x.arrival_time)
+                logs.append(f"[Time {current_time}]: CPU is IDLE. Waiting for arrival of Process {next_proc.pid}.")
                 gantt.append(("IDLE", current_time, next_proc.arrival_time))
                 current_time = next_proc.arrival_time
                 continue
             
-            # Sort matching user priority configuration rule
             if reverse_priority:
                 chosen = max(available, key=lambda x: (x.priority, -x.arrival_time))
             else:
                 chosen = min(available, key=lambda x: (x.priority, x.arrival_time))
                 
             start = current_time
-            logs.append(f"[Time {start}]: Executing Process {chosen.pid} based on requested priority metric rules ({chosen.priority}).")
+            logs.append(f"[Time {start}]: Selecting Process {chosen.pid} (Priority={chosen.priority}, Burst={chosen.burst_time}).")
             current_time += chosen.burst_time
             
             chosen.completion_time = current_time
@@ -231,7 +223,7 @@ class CPUSchedulerEngine:
             
             gantt.append((chosen.pid, start, current_time))
             completed.append(chosen)
-            logs.append(f"[Time {current_time}]: Finished Priority process {chosen.pid}.")
+            logs.append(f"[Time {current_time}]: Process {chosen.pid} completed execution.")
             
         return procs, gantt, logs
 
@@ -246,9 +238,7 @@ class CPUSchedulerEngine:
         last_pid = None
         block_start = 0
         
-        mode_str = "Higher Value = Higher Priority" if reverse_priority else "Lower Value = Higher Priority"
-        logs.append(f"[Time 0]: Preemptive Priority Scheduling core active ({mode_str}).")
-        
+        logs.append(f"[Time 0]: Priority (Preemptive) Engine initialized. Mode: {'Higher value = Higher priority' if reverse_priority else 'Lower value = Higher priority'}.")
         while completed_count < n:
             available = [p for p in procs if p.arrival_time <= current_time and p.remaining_time > 0]
             
@@ -257,11 +247,11 @@ class CPUSchedulerEngine:
                     gantt.append((last_pid, block_start, current_time))
                     last_pid = None
                 next_arrival = min([p.arrival_time for p in procs if p.remaining_time > 0])
+                logs.append(f"[Time {current_time}]: CPU is IDLE. Fast-forwarding to next arrival at Time {next_arrival}.")
                 gantt.append(("IDLE", current_time, next_arrival))
                 current_time = next_arrival
                 continue
             
-            # Select matching rule matching user configuration settings
             if reverse_priority:
                 chosen = max(available, key=lambda x: (x.priority, -x.arrival_time))
             else:
@@ -270,7 +260,9 @@ class CPUSchedulerEngine:
             if chosen.pid != last_pid:
                 if last_pid is not None:
                     gantt.append((last_pid, block_start, current_time))
-                    logs.append(f"[Time {current_time}]: Preemption via priority shift! Process {chosen.pid} took core from {last_pid}.")
+                    logs.append(f"[Time {current_time}]: Preemption! Context switch from {last_pid} to higher priority Process {chosen.pid}.")
+                else:
+                    logs.append(f"[Time {current_time}]: Context Switch -> dispatching Process {chosen.pid}.")
                 last_pid = chosen.pid
                 block_start = current_time
                 
@@ -284,47 +276,43 @@ class CPUSchedulerEngine:
                 chosen.turnaround_time = chosen.completion_time - chosen.arrival_time
                 chosen.waiting_time = chosen.turnaround_time - chosen.burst_time
                 completed_count += 1
-                logs.append(f"[Time {current_time}]: Finished priority task {chosen.pid}.")
+                logs.append(f"[Time {current_time}]: Process {chosen.pid} completed execution.")
                 block_start = current_time
                 
         return procs, gantt, logs
 
     @staticmethod
     def run_hrrn(processes):
-        """Highest Response Ratio Next (HRRN) Scheduling Logic Loop"""
         procs = [copy.deepcopy(p) for p in processes]
         gantt = []
         logs = []
         current_time = 0
         completed = []
         
-        logs.append(f"[Time 0]: Highest Response Ratio Next (HRRN) Engine online.")
+        logs.append(f"[Time 0]: HRRN Engine initialized.")
         while len(completed) < len(processes):
             available = [p for p in procs if p.arrival_time <= current_time and p not in completed]
             
             if not available:
                 next_proc = min([p for p in procs if p not in completed], key=lambda x: x.arrival_time)
+                logs.append(f"[Time {current_time}]: CPU is IDLE. Waiting for arrival of Process {next_proc.pid}.")
                 gantt.append(("IDLE", current_time, next_proc.arrival_time))
-                logs.append(f"[Time {current_time}]: CPU IDLE. Advancing clock directly to next process arrival at {next_proc.arrival_time}.")
                 current_time = next_proc.arrival_time
                 continue
                 
-            logs.append(f"[Time {current_time}]: Evaluating Response Ratios for active jobs:")
             highest_ratio = -1
             chosen = None
-            
+            logs.append(f"[Time {current_time}]: Calculating Response Ratios for available processes:")
             for p in available:
                 wait_time = current_time - p.arrival_time
                 ratio = (wait_time + p.burst_time) / p.burst_time
-                logs.append(f" -> Process {p.pid}: Wait={wait_time}, Burst={p.burst_time} => Response Ratio = {ratio:.2f}")
-                
+                logs.append(f" -> Process {p.pid}: (Wait {wait_time} + Burst {p.burst_time}) / {p.burst_time} = Ratio {ratio:.2f}")
                 if ratio > highest_ratio:
                     highest_ratio = ratio
                     chosen = p
             
             start = current_time
-            logs.append(f"[Time {start}]: Dispatched Process {chosen.pid} with the Highest Response Ratio ({highest_ratio:.2f}).")
-            
+            logs.append(f"[Time {start}]: Selecting Process {chosen.pid} with the highest Response Ratio ({highest_ratio:.2f}).")
             current_time += chosen.burst_time
             chosen.completion_time = current_time
             chosen.turnaround_time = chosen.completion_time - chosen.arrival_time
@@ -332,18 +320,103 @@ class CPUSchedulerEngine:
             
             gantt.append((chosen.pid, start, current_time))
             completed.append(chosen)
-            logs.append(f"[Time {current_time}]: Non-preemptive block finished for Process {chosen.pid}.")
+            logs.append(f"[Time {current_time}]: Process {chosen.pid} completed execution.")
             
         return procs, gantt, logs
 
 # ==============================================================================
-# 3. INTERACTIVE DASHBOARD SYSTEM
+# 3. GANTT CHART TIMELINE RENDERING ENGINE
+# ==============================================================================
+class GanttTimelineWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.gantt_data = []
+        self.setMinimumHeight(80)  
+        
+    def update_data(self, gantt_data):
+        self.gantt_data = gantt_data
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        painter.fillRect(self.rect(), QColor("#1e272e"))
+
+        if not self.gantt_data:
+            return
+
+        margin_x = 40
+        top_y = 15
+        box_height = 32  
+        axis_y = top_y + box_height
+        block_gap = 4  
+        
+        total_duration = self.gantt_data[-1][2] if self.gantt_data else 1
+        if total_duration == 0:
+            total_duration = 1
+            
+        render_width = self.width() - (2 * margin_x)
+        scale_factor = render_width / total_duration
+
+        for block in self.gantt_data:
+            pid, start, end = block
+            
+            x_start = margin_x + int(start * scale_factor)
+            x_end = margin_x + int(end * scale_factor)
+            w = x_end - x_start
+            
+            if w > block_gap:
+                w -= block_gap
+
+            rect = QRect(x_start, top_y, w, box_height)
+            
+            if pid == "IDLE":
+                bg_color = QColor("#d2d7d9")
+                fg_color = QColor("#7f8c8d")
+            else:
+                bg_color = QColor("#3498db")  
+                fg_color = QColor("#ffffff")
+
+            painter.setBrush(bg_color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, 4, 4)
+
+            painter.setPen(fg_color)
+            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(pid))
+
+        painter.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        
+        timestamps = []
+        timestamps.append((self.gantt_data[0][1], margin_x))
+        
+        for i in range(len(self.gantt_data) - 1):
+            curr_end_val = self.gantt_data[i][2]
+            x_end_theoretical = margin_x + int(curr_end_val * scale_factor)
+            x_left_aligned = x_end_theoretical - block_gap
+            timestamps.append((curr_end_val, int(x_left_aligned)))
+            
+        final_t = self.gantt_data[-1][2]
+        final_x = margin_x + int(final_t * scale_factor) - block_gap
+        timestamps.append((final_t, final_x))
+
+        for time_val, x_pos in timestamps:
+            text_str = str(time_val)
+            text_width = painter.fontMetrics().horizontalAdvance(text_str)
+            text_rect = QRect(int(x_pos - (text_width / 2.0)), axis_y + 4, text_width + 10, 15)
+            
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter, text_str)
+
+# ==============================================================================
+# 4. INTERACTIVE DASHBOARD UI SYSTEM
 # ==============================================================================
 class SimulationDashboard(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Cosmos College - Interactive CPU Scheduler Dashboard")
-        self.resize(1200, 800)
+        self.resize(1200, 840)
         
         self.last_sim_results = None
         self.last_algo_used = ""
@@ -366,7 +439,6 @@ class SimulationDashboard(QMainWindow):
         self.algo_combo.currentTextChanged.connect(self.toggle_inputs)
         config_layout.addWidget(self.algo_combo)
         
-        # Round Robin Inputs
         self.lbl_quantum = QLabel("Time Quantum:")
         config_layout.addWidget(self.lbl_quantum)
         self.quantum_spin = QSpinBox()
@@ -374,7 +446,6 @@ class SimulationDashboard(QMainWindow):
         self.quantum_spin.setValue(2)
         config_layout.addWidget(self.quantum_spin)
         
-        # Priority Radio Selection Logic Setup (Ascending vs Descending Sort)
         self.lbl_priority_rule = QLabel("Priority Order:")
         self.radio_low_high = QRadioButton("Lower # = Higher Priority")
         self.radio_high_low = QRadioButton("Higher # = Higher Priority")
@@ -401,7 +472,7 @@ class SimulationDashboard(QMainWindow):
         config_box.setLayout(config_layout)
         main_layout.addWidget(config_box)
         
-        # --- Middle Process Setup Matrix (Dynamic Rows) ---
+        # --- Middle Process Setup Matrix ---
         proc_box = QGroupBox("Process Management Table")
         proc_layout = QVBoxLayout()
         
@@ -434,19 +505,22 @@ class SimulationDashboard(QMainWindow):
         proc_box.setLayout(proc_layout)
         main_layout.addWidget(proc_box)
         
-        # --- Visual Gantt Sequence Generation Bar ---
-        gantt_box = QGroupBox("Visual Gantt Timeline Stream")
-        self.gantt_layout = QHBoxLayout()
-        gantt_box.setLayout(self.gantt_layout)
-        main_layout.addWidget(gantt_box)
+        # --- Visual Vector-Based Gantt Timeline Panel ---
+        self.gantt_box = QGroupBox("Visual Gantt Timeline Stream")
+        gantt_container_layout = QVBoxLayout(self.gantt_box)
         
-        # --- Middle Bottom Split Layout (Analytics vs Logs) ---
+        self.gantt_view = GanttTimelineWidget()
+        gantt_container_layout.addWidget(self.gantt_view)
+        main_layout.addWidget(self.gantt_box)
+        
+        self.gantt_box.setVisible(False)
+        
+        # --- Middle Bottom Split Layout ---
         bottom_split = QHBoxLayout()
         
         output_box = QGroupBox("Analytics & Performance Metrics")
         output_layout = QVBoxLayout()
         
-        # Updated output table to include Optional Priority column mapping (7 columns total)
         self.output_table = QTableWidget(0, 7)
         self.output_table.setHorizontalHeaderLabels([
             "Process ID", "Arrival Time", "Burst Time", "Priority", "Completion Time", "Turnaround Time", "Waiting Time"
@@ -455,13 +529,12 @@ class SimulationDashboard(QMainWindow):
         output_layout.addWidget(self.output_table)
         
         self.lbl_averages = QLabel("Average Waiting Time: -- | Average Turnaround Time: --")
-        self.lbl_averages.setStyleSheet("font-size: 13px; font-weight: bold; color: #2c3e50;")
+        self.lbl_averages.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
         output_layout.addWidget(self.lbl_averages)
         output_box.setLayout(output_layout)
         bottom_split.addWidget(output_box, stretch=3)
         
-        # State Verification Simulation Log
-        log_box = QGroupBox("Step-by-Step State Transition Verification Log")
+        log_box = QGroupBox("State Transition Verification Log")
         log_layout = QVBoxLayout()
         self.txt_logs = QTextEdit()
         self.txt_logs.setReadOnly(True)
@@ -478,22 +551,14 @@ class SimulationDashboard(QMainWindow):
         is_rr = (algo == "Round Robin")
         is_priority_algo = "Priority" in algo
         
-        # Toggle Time Quantum Visibility
         self.lbl_quantum.setVisible(is_rr)
         self.quantum_spin.setVisible(is_rr)
-        
-        # Toggle Priority Sorting Order Radio Options Visibility
         self.lbl_priority_rule.setVisible(is_priority_algo)
         self.radio_low_high.setVisible(is_priority_algo)
         self.radio_high_low.setVisible(is_priority_algo)
         
-        # Dynamic Column Filtering: Priority column is Index 3 on input_table and Index 3 on output_table
-        if is_priority_algo:
-            self.input_table.setColumnHidden(3, False)
-            self.output_table.setColumnHidden(3, False)
-        else:
-            self.input_table.setColumnHidden(3, True)
-            self.output_table.setColumnHidden(3, True)
+        self.input_table.setColumnHidden(3, not is_priority_algo)
+        self.output_table.setColumnHidden(3, not is_priority_algo)
 
     def add_process_row(self):
         row_idx = self.input_table.rowCount()
@@ -517,8 +582,6 @@ class SimulationDashboard(QMainWindow):
                 pid = self.input_table.item(row, 0).text()
                 arr = int(self.input_table.item(row, 1).text())
                 burst = int(self.input_table.item(row, 2).text())
-                
-                # Check priority item text safely, default to 0 if hidden/empty
                 priority_item = self.input_table.item(row, 3)
                 priority = int(priority_item.text() if (priority_item and priority_item.text()) else 0)
                 
@@ -531,8 +594,6 @@ class SimulationDashboard(QMainWindow):
 
         algo = self.algo_combo.currentText()
         self.last_algo_used = algo
-        
-        # Read user choice for radio priority order orientation
         reverse_priority = self.radio_high_low.isChecked()
         
         if algo == "FCFS":
@@ -556,11 +617,8 @@ class SimulationDashboard(QMainWindow):
             results, gantt, logs = CPUSchedulerEngine.run_hrrn(processes)
 
         self.last_sim_results = results
-
-        # Update Logs display
         self.txt_logs.setText("\n".join(logs))
 
-        # Render Output Table metrics
         self.output_table.setRowCount(len(results))
         tot_wt, tot_tat = 0, 0
         for row, p in enumerate(results):
@@ -578,29 +636,11 @@ class SimulationDashboard(QMainWindow):
         avg_tat = tot_tat / len(results)
         self.lbl_averages.setText(f"Average Waiting Time: {avg_wt:.2f} ms | Average Turnaround Time: {avg_tat:.2f} ms")
 
-        # Generate Graphical Gantt blocks
-        while self.gantt_layout.count():
-            child = self.gantt_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-                
-        for block in gantt:
-            pid, start, end = block
-            duration = end - start
-            lbl_block = QLabel(f"{pid}\n({start}-{end})")
-            lbl_block.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl_block.setMinimumHeight(50)
-            
-            if pid == "IDLE":
-                lbl_block.setStyleSheet("background-color: #bdc3c7; color: #7f8c8d; border: 1px solid gray; border-radius: 4px;")
-            else:
-                lbl_block.setStyleSheet("background-color: #3498db; color: white; font-weight: bold; border: 1px solid #2980b9; border-radius: 4px;")
-                
-            self.gantt_layout.addWidget(lbl_block, stretch=duration)
+        self.gantt_box.setVisible(True)
+        self.gantt_view.update_data(gantt)
 
     def export_report(self):
         if not self.last_sim_results:
-            self.txt_logs.append("\n[ERROR]: Run a simulation before exporting a report.")
             return
             
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Simulation Report", "", "Text Files (*.txt);;All Files (*)")
@@ -610,38 +650,23 @@ class SimulationDashboard(QMainWindow):
                 f.write("          COSMOS COLLEGE - CPU SCHEDULING SIMULATION REPORT            \n")
                 f.write("========================================================================\n\n")
                 f.write(f"Algorithm Evaluated: {self.last_algo_used}\n")
-                f.write(f"Total Process Workload: {len(self.last_sim_results)} processes\n\n")
                 f.write("------------------------------------------------------------------------\n")
-                
-                if "Priority" in self.last_algo_used:
-                    f.write("PID\tArrival\tBurst\tPriority\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
-                else:
-                    f.write("PID\tArrival\tBurst\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
-                    
+                f.write("PID\tArrival\tBurst\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
                 f.write("------------------------------------------------------------------------\n")
                 
                 tot_wt, tot_tat = 0, 0
                 for p in self.last_sim_results:
-                    if "Priority" in self.last_algo_used:
-                        f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.priority}\t\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
-                    else:
-                        f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
+                    f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
                     tot_wt += p.waiting_time
                     tot_tat += p.turnaround_time
                     
-                avg_wt = tot_wt / len(self.last_sim_results)
-                avg_tat = tot_tat / len(self.last_sim_results)
-                
                 f.write("------------------------------------------------------------------------\n")
-                f.write(f"AVERAGE WAITING TIME (AWT):     {avg_wt:.2f} ms\n")
-                f.write(f"AVERAGE TURNAROUND TIME (ATAT): {avg_tat:.2f} ms\n")
-                f.write("========================================================================\n")
-                f.write("Report generated successfully via Interactive Simulation UI Framework.\n")
-            
-            self.txt_logs.append(f"\n[SYSTEM]: Analytical report written to: {file_path}")
+                f.write(f"AVERAGE WAITING TIME (AWT):     {tot_wt/len(self.last_sim_results):.2f} ms\n")
+                f.write(f"AVERAGE TURNAROUND TIME (ATAT): {tot_tat/len(self.last_sim_results):.2f} ms\n")
+            self.txt_logs.append(f"\n[SYSTEM]: Report written to: {file_path}")
 
 # ==============================================================================
-# 4. EXECUTION RUNTIME ENTRYPOINT
+# 5. EXECUTION RUNTIME ENTRYPOINT
 # ==============================================================================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
