@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (
     QLabel, QSpinBox, QHeaderView, QGroupBox, QTextEdit, QFileDialog,
     QRadioButton, QButtonGroup, QListWidget, QListWidgetItem
 )
-from PyQt6.QtCore import Qt, QRect
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QIcon
+from PyQt6.QtCore import Qt, QRect, QMarginsF
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QIcon, QTextDocument, QPageLayout
+from PyQt6.QtPrintSupport import QPrinter
 
 # ==============================================================================
 # 1. CORE OBJECT MODELS AND DATA CONTRACTS
@@ -553,7 +554,7 @@ class SimulationDashboard(QMainWindow):
         log_box.setLayout(log_layout)
         bottom_split.addWidget(log_box, stretch=3)
 
-        # --- NEW: Simulation Run History Archive Panel ---
+        # --- Simulation Run History Archive Panel ---
         history_box = QGroupBox("Simulation Run History Archive")
         history_layout = QVBoxLayout()
         self.history_list_widget = QListWidget()
@@ -728,29 +729,92 @@ class SimulationDashboard(QMainWindow):
 
     def export_report(self):
         if not self.last_sim_results:
+            self.txt_logs.append("\n[ERROR]: No active simulation results to export. Run a simulation first.")
             return
             
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Simulation Report", "", "Text Files (*.txt);;All Files (*)")
-        if file_path:
-            with open(file_path, "w") as f:
-                f.write("========================================================================\n")
-                f.write("          COSMOS COLLEGE - CPU SCHEDULING SIMULATION REPORT            \n")
-                f.write("========================================================================\n\n")
-                f.write(f"Algorithm Evaluated: {self.last_algo_used}\n")
-                f.write("------------------------------------------------------------------------\n")
-                f.write("PID\tArrival\tBurst\tCompletion\tTurnaround (TAT)\tWaiting (WT)\n")
-                f.write("------------------------------------------------------------------------\n")
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Simulation Report", "", "PDF Files (*.pdf);;All Files (*)")
+        if not file_path:
+            return
+            
+        # Ensure file extension is explicitly .pdf
+        if not file_path.lower().endswith('.pdf'):
+            file_path += '.pdf'
+            
+        try:
+            # Build HTML content for structural PDF formatting with explicit legible styling [cite: 26, 27]
+            html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 30px; color: #2c3e50; }}
+                    h2 {{ text-align: center; color: #2c3e50; border-bottom: 2px solid #34495e; padding-bottom: 12px; font-size: 20px; }}
+                    p {{ font-size: 14px; margin-bottom: 8px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                    th, td {{ border: 1px solid #bdc3c7; padding: 10px; text-align: center; font-size: 13px; }}
+                    th {{ background-color: #f8f9fa; font-weight: bold; color: #2c3e50; }}
+                    .summary {{ margin-top: 25px; padding: 15px; background-color: #f1f2f6; border-radius: 6px; border-left: 5px solid #2ecc71; }}
+                    .summary p {{ font-weight: bold; font-size: 14px; color: #2c3e50; margin: 5px 0; }}
+                </style>
+            </head>
+            <body>
+                <h2>COSMOS COLLEGE - CPU SCHEDULING SIMULATION REPORT</h2>
+                <p><strong>Algorithm Evaluated:</strong> {self.last_algo_used}</p>
                 
-                tot_wt, tot_tat = 0, 0
-                for p in self.last_sim_results:
-                    f.write(f"{p.pid}\t{p.arrival_time}\t{p.burst_time}\t{p.completion_time}\t\t{p.turnaround_time}\t\t\t{p.waiting_time}\n")
-                    tot_wt += p.waiting_time
-                    tot_tat += p.turnaround_time
-                    
-                f.write("------------------------------------------------------------------------\n")
-                f.write(f"AVERAGE WAITING TIME (AWT):     {tot_wt/len(self.last_sim_results):.2f} ms\n")
-                f.write(f"AVERAGE TURNAROUND TIME (ATAT): {tot_tat/len(self.last_sim_results):.2f} ms\n")
-            self.txt_logs.append(f"\n[SYSTEM]: Report written to: {file_path}")
+                <table>
+                    <tr>
+                        <th>PID</th>
+                        <th>Arrival Time</th>
+                        <th>Burst Time</th>
+                        <th>Completion Time</th>
+                        <th>Turnaround (TAT)</th>
+                        <th>Waiting (WT)</th>
+                    </tr>
+            """
+            
+            tot_wt, tot_tat = 0, 0
+            for p in self.last_sim_results:
+                html_content += f"""
+                    <tr>
+                        <td><strong>{p.pid}</strong></td>
+                        <td>{p.arrival_time} ms</td>
+                        <td>{p.burst_time} ms</td>
+                        <td>{p.completion_time} ms</td>
+                        <td>{p.turnaround_time} ms</td>
+                        <td>{p.waiting_time} ms</td>
+                    </tr>
+                """
+                tot_wt += p.waiting_time
+                tot_tat += p.turnaround_time
+                
+            avg_wt = tot_wt / len(self.last_sim_results)
+            avg_tat = tot_tat / len(self.last_sim_results)
+            
+            html_content += f"""
+                </table>
+                <div class="summary">
+                    <p>AVERAGE WAITING TIME (AWT): &nbsp;&nbsp;&nbsp;&nbsp;{avg_wt:.2f} ms</p>
+                    <p>AVERAGE TURNAROUND TIME (ATAT): {avg_tat:.2f} ms</p>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Setup Printer and Document components [cite: 23, 28]
+            document = QTextDocument()
+            document.setHtml(html_content)
+            
+            # Using ScreenResolution so font sizes match expected visual output [cite: 39, 41]
+            printer = QPrinter(QPrinter.PrinterMode.ScreenResolution)
+            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            printer.setOutputFileName(file_path)
+            printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter)
+            
+            # Print document map to storage [cite: 23, 28]
+            document.print(printer)
+            self.txt_logs.append(f"\n[SYSTEM]: PDF Report successfully saved to: {file_path}")
+            
+        except Exception as e:
+            self.txt_logs.append(f"\n[SYSTEM ERROR]: Could not render PDF document. {str(e)}")
 
 # ==============================================================================
 # 5. EXECUTION RUNTIME ENTRYPOINT
