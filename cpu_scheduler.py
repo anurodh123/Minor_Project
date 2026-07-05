@@ -1,13 +1,15 @@
 import sys
+import os
 import copy
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTableWidget, QTableWidgetItem, QPushButton, QComboBox, 
     QLabel, QSpinBox, QHeaderView, QGroupBox, QTextEdit, QFileDialog,
-    QRadioButton, QButtonGroup
+    QRadioButton, QButtonGroup, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, QRect
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QIcon
 
 # ==============================================================================
 # 1. CORE OBJECT MODELS AND DATA CONTRACTS
@@ -410,16 +412,24 @@ class GanttTimelineWidget(QWidget):
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter, text_str)
 
 # ==============================================================================
-# 4. INTERACTIVE DASHBOARD UI SYSTEM
+# 4. INTERACTIVE DASHBOARD UI SYSTEM (WITH COMPREHENSIVE HISTORY STATE)
 # ==============================================================================
 class SimulationDashboard(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Cosmos College - Interactive CPU Scheduler Dashboard")
-        self.resize(1200, 840)
+        self.resize(1300, 860)
+        
+        # Look for the custom logo
+        icon_filename = "image_1b910a.jpg"
+        if os.path.exists(icon_filename):
+            self.setWindowIcon(QIcon(icon_filename))
         
         self.last_sim_results = None
         self.last_algo_used = ""
+        
+        # Structured Runtime History Archive
+        self.history_records = []
         
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -532,7 +542,7 @@ class SimulationDashboard(QMainWindow):
         self.lbl_averages.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
         output_layout.addWidget(self.lbl_averages)
         output_box.setLayout(output_layout)
-        bottom_split.addWidget(output_box, stretch=3)
+        bottom_split.addWidget(output_box, stretch=4)
         
         log_box = QGroupBox("State Transition Verification Log")
         log_layout = QVBoxLayout()
@@ -541,7 +551,23 @@ class SimulationDashboard(QMainWindow):
         self.txt_logs.setStyleSheet("background-color: #2c3e50; color: #1abc9c; font-family: Consolas; font-size: 11px;")
         log_layout.addWidget(self.txt_logs)
         log_box.setLayout(log_layout)
-        bottom_split.addWidget(log_box, stretch=2)
+        bottom_split.addWidget(log_box, stretch=3)
+
+        # --- NEW: Simulation Run History Archive Panel ---
+        history_box = QGroupBox("Simulation Run History Archive")
+        history_layout = QVBoxLayout()
+        self.history_list_widget = QListWidget()
+        self.history_list_widget.setStyleSheet("background-color: #1e272e; color: #f5f6fa; font-family: Segoe UI; font-size: 11px;")
+        self.history_list_widget.itemClicked.connect(self.load_historical_record)
+        history_layout.addWidget(self.history_list_widget)
+        
+        self.btn_clear_history = QPushButton("Clear History")
+        self.btn_clear_history.setStyleSheet("background-color: #c0392b; color: white; font-size: 11px; padding: 3px;")
+        self.btn_clear_history.clicked.connect(self.clear_history_log)
+        history_layout.addWidget(self.btn_clear_history)
+        
+        history_box.setLayout(history_layout)
+        bottom_split.addWidget(history_box, stretch=2)
         
         main_layout.addLayout(bottom_split)
         self.toggle_inputs()
@@ -617,10 +643,45 @@ class SimulationDashboard(QMainWindow):
             results, gantt, logs = CPUSchedulerEngine.run_hrrn(processes)
 
         self.last_sim_results = results
-        self.txt_logs.setText("\n".join(logs))
-
-        self.output_table.setRowCount(len(results))
+        
+        # Calculate metric averages
         tot_wt, tot_tat = 0, 0
+        for p in results:
+            tot_wt += p.waiting_time
+            tot_tat += p.turnaround_time
+        avg_wt = tot_wt / len(results) if results else 0
+        avg_tat = tot_tat / len(results) if results else 0
+        
+        # Render the current layout outputs
+        self.display_metrics_and_gantt(results, gantt, "\n".join(logs), avg_wt, avg_tat)
+
+        # Archive metrics data structural matrix into simulation runtime history array
+        timestamp_str = datetime.now().strftime("%H:%M:%S")
+        record_title = f"[{timestamp_str}] {algo} ({len(results)} Procs)"
+        
+        snapshot = {
+            "title": record_title,
+            "algo_used": self.last_algo_used,
+            "results": results,
+            "gantt": gantt,
+            "logs_text": "\n".join(logs),
+            "avg_wt": avg_wt,
+            "avg_tat": avg_tat,
+            "hide_priority": "Priority" not in algo
+        }
+        
+        self.history_records.append(snapshot)
+        
+        # Insert item into history view tracking list widget
+        list_item = QListWidgetItem(record_title)
+        self.history_list_widget.addItem(list_item)
+        self.history_list_widget.scrollToItem(list_item)
+
+    def display_metrics_and_gantt(self, results, gantt, logs_text, avg_wt, avg_tat, hide_priority_override=None):
+        """Helper to draw and update metrics panel fields dynamically."""
+        self.txt_logs.setText(logs_text)
+        self.output_table.setRowCount(len(results))
+        
         for row, p in enumerate(results):
             self.output_table.setItem(row, 0, QTableWidgetItem(str(p.pid)))
             self.output_table.setItem(row, 1, QTableWidgetItem(str(p.arrival_time)))
@@ -629,15 +690,41 @@ class SimulationDashboard(QMainWindow):
             self.output_table.setItem(row, 4, QTableWidgetItem(str(p.completion_time)))
             self.output_table.setItem(row, 5, QTableWidgetItem(str(p.turnaround_time)))
             self.output_table.setItem(row, 6, QTableWidgetItem(str(p.waiting_time)))
-            tot_wt += p.waiting_time
-            tot_tat += p.turnaround_time
             
-        avg_wt = tot_wt / len(results)
-        avg_tat = tot_tat / len(results)
         self.lbl_averages.setText(f"Average Waiting Time: {avg_wt:.2f} ms | Average Turnaround Time: {avg_tat:.2f} ms")
+        
+        # Apply correct visibility configuration constraints
+        hide_p = "Priority" not in self.algo_combo.currentText() if hide_priority_override is None else hide_priority_override
+        self.output_table.setColumnHidden(3, hide_p)
 
         self.gantt_box.setVisible(True)
         self.gantt_view.update_data(gantt)
+
+    def load_historical_record(self, item):
+        """Loads and switches dashboard focus view to an archived past simulation run execution state context."""
+        clicked_idx = self.history_list_widget.row(item)
+        if 0 <= clicked_idx < len(self.history_records):
+            snapshot = self.history_records[clicked_idx]
+            
+            # Temporarily restore engine global parameter values for report tracking metrics matching
+            self.last_sim_results = snapshot["results"]
+            self.last_algo_used = snapshot["algo_used"]
+            
+            # Repopulate user workspace display widgets seamlessly
+            self.display_metrics_and_gantt(
+                snapshot["results"], 
+                snapshot["gantt"], 
+                snapshot["logs_text"] + "\n\n*** [HISTORY SNAPSHOT VIEW ACTIVE] ***", 
+                snapshot["avg_wt"], 
+                snapshot["avg_tat"],
+                hide_priority_override=snapshot["hide_priority"]
+            )
+
+    def clear_history_log(self):
+        """Purges history records backend state maps and clears list layout components widget interface elements."""
+        self.history_records.clear()
+        self.history_list_widget.clear()
+        self.txt_logs.append("\n[SYSTEM]: Local runtime execution history archive has been wiped.")
 
     def export_report(self):
         if not self.last_sim_results:
