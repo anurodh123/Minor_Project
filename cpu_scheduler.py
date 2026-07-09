@@ -816,7 +816,7 @@ class SimulationDashboard(QMainWindow):
         except Exception as e:
             self.txt_logs.append(f"\n[SYSTEM ERROR]: Could not render PDF document. {str(e)}")
 
-
+# 5. EXECUTION RUNTIME ENTRYPOINT
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = SimulationDashboard()
