@@ -414,7 +414,7 @@ class GanttTimelineWidget(QWidget):
 
 # ==============================================================================
 # 4. INTERACTIVE DASHBOARD UI SYSTEM (WITH COMPREHENSIVE HISTORY STATE)
-# ==============================================================================
+
 class SimulationDashboard(QMainWindow):
     def __init__(self):
         super().__init__()
