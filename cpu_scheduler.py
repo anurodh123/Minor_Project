@@ -412,9 +412,7 @@ class GanttTimelineWidget(QWidget):
             painter.setPen(QColor("#ffffff"))
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter, text_str)
 
-# ==============================================================================
 # 4. INTERACTIVE DASHBOARD UI SYSTEM (WITH COMPREHENSIVE HISTORY STATE)
-
 class SimulationDashboard(QMainWindow):
     def __init__(self):
         super().__init__()
