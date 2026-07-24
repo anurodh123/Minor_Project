@@ -5,7 +5,7 @@ import math
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem, 
                              QPushButton, QComboBox, QSpinBox, QTextEdit, QMessageBox, 
-                             QGroupBox, QListWidget, QGridLayout, QGraphicsView, QGraphicsScene)
+                             QGroupBox, QListWidget, QListWidgetItem, QGridLayout, QGraphicsView, QGraphicsScene)
 from PyQt6.QtCore import Qt, QPointF, QCoreApplication
 from PyQt6.QtGui import QColor, QPen, QBrush, QPainter, QFont, QPolygonF
 
@@ -68,14 +68,45 @@ class BankersAlgorithm:
             return True
         return False
 
-    def check_safety_state(self):
+    def get_ready_candidates(self, work, finish):
+        """Returns the indices of all not-yet-finished processes whose need
+        can be satisfied by the given `work` vector right now. When this
+        list has more than one entry, the safety check has hit a genuine
+        tie -- more than one process could legally go next, and the caller
+        (interactive UI or auto tie-break rule) decides which one runs."""
+        candidates = []
+        for i in range(self.num_processes):
+            if not finish[i]:
+                if all(self.need[i][j] <= work[j] for j in range(self.num_resources)):
+                    candidates.append(i)
+        return candidates
+
+    def check_safety_state(self, scan_reverse=False):
+        """
+        Runs the Banker's Algorithm safety check.
+
+        scan_reverse=False -> at each round, processes are considered in
+            ascending order (P0, P1, ..., Pn-1). Ties (multiple processes
+            executable in the same round) resolve in favor of the LOWER
+            index, so sequences tend to start from P0's side.
+        scan_reverse=True -> processes are considered in descending order
+            (Pn-1, ..., P1, P0). Ties resolve in favor of the HIGHER
+            index, so sequences tend to start from P4's side.
+
+        Both directions are mathematically valid; the Banker's Algorithm
+        only guarantees *a* safe sequence exists, not a unique one. This
+        option just lets you reproduce whichever tie-breaking convention
+        a particular textbook example used.
+        """
         work = list(self.available)
         finish = [False] * self.num_processes
         safe_sequence = []
 
+        scan_range = range(self.num_processes - 1, -1, -1) if scan_reverse else range(self.num_processes)
+
         while len(safe_sequence) < self.num_processes:
             found_executable_process = False
-            for i in range(self.num_processes):
+            for i in scan_range:
                 if not finish[i]:
                     can_execute = True
                     for j in range(self.num_resources):
@@ -122,6 +153,7 @@ class DeadlockSimWindow(QMainWindow):
         current_alloc = [[0, 1, 0], [2, 0, 0], [3, 0, 2], [2, 1, 1], [0, 0, 2]]
         self.engine = BankersAlgorithm(5, 3, init_avail, max_demand, current_alloc)
         self.dynamic_spinboxes = [] 
+        self.history_snapshots = []  # Stores full-state snapshots, index-aligned with history_list_widget rows
 
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
@@ -133,6 +165,7 @@ class DeadlockSimWindow(QMainWindow):
         self.rebuild_dynamic_spinboxes()
         self.update_gui_tables()
         self.load_current_matrix_values_to_spinboxes()
+        self.save_history_entry("Initial baseline state")
 
     def init_ui(self):
         main_widget = QWidget()
@@ -241,6 +274,24 @@ class DeadlockSimWindow(QMainWindow):
 
         ctrl_vbox.addSpacing(15)
 
+        scan_dir_hbox = QHBoxLayout()
+        scan_dir_hbox.addWidget(QLabel("When Multiple Processes Are Ready:"))
+        self.combo_scan_direction = QComboBox()
+        self.combo_scan_direction.addItems([
+            "Ask me which one to run",
+            "Auto: Ascending (P0 -> Pn first)",
+            "Auto: Descending (Pn -> P0 first)"
+        ])
+        self.combo_scan_direction.setToolTip(
+            "The Banker's Algorithm often has more than one process that\n"
+            "could legally run next in a given round. \"Ask me\" pauses the\n"
+            "simulation and lets you pick (e.g. P0 vs P4), just like working\n"
+            "it out by hand. The Auto options pick automatically by index\n"
+            "order instead, without prompting."
+        )
+        scan_dir_hbox.addWidget(self.combo_scan_direction)
+        ctrl_vbox.addLayout(scan_dir_hbox)
+
         # ... (find this part in your init_ui method)
         self.btn_safety = QPushButton("Execute Simulation")
         self.btn_safety.setStyleSheet("font-weight: bold; height: 32px;")
@@ -284,10 +335,18 @@ class DeadlockSimWindow(QMainWindow):
         right_sidebar_layout = QVBoxLayout()
         outer_layout.addLayout(right_sidebar_layout, stretch=1)
 
-        history_group = QGroupBox("System Action Event History")
+        history_group = QGroupBox("Action History (click an entry to restore it)")
         history_vbox = QVBoxLayout(history_group)
         self.history_list_widget = QListWidget()
+        self.history_list_widget.itemClicked.connect(self.handle_history_item_clicked)
         history_vbox.addWidget(self.history_list_widget)
+
+        history_btn_row = QHBoxLayout()
+        self.btn_clear_history = QPushButton("Clear History")
+        self.btn_clear_history.clicked.connect(self.handle_clear_history)
+        history_btn_row.addWidget(self.btn_clear_history)
+        history_vbox.addLayout(history_btn_row)
+
         right_sidebar_layout.addWidget(history_group, stretch=1)
 
         log_group = QGroupBox("Real-time Kernel Space Console Logs")
@@ -415,16 +474,73 @@ class DeadlockSimWindow(QMainWindow):
     # =====================================================================
     # INTERFACE HANDLERS & REALTIME SIMULATOR
     # =====================================================================
-    def handle_safety_check(self):
-        # 1. PRESERVE ORIGINAL DATA
+    def prompt_user_for_next_process(self, candidates, work):
+        """Pops a dialog listing every process that is currently eligible
+        to run (need <= work) and blocks until the user picks one. This is
+        exactly the "should I go to P0 or P4?" fork -- both are valid,
+        Banker's Algorithm doesn't say which comes first, so the person
+        running the simulation decides."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Multiple Processes Ready")
+        msg.setIcon(QMessageBox.Icon.Question)
+        cand_str = ", ".join(f"P{c}" for c in candidates)
+        msg.setText(
+            f"Available = {work}\n\n"
+            f"More than one process can safely execute right now: {cand_str}.\n"
+            f"Which one should run next?"
+        )
+        choice_buttons = {}
+        for idx in candidates:
+            btn = msg.addButton(f"Run P{idx}", QMessageBox.ButtonRole.ActionRole)
+            choice_buttons[btn] = idx
+        msg.exec()
+        clicked = msg.clickedButton()
+        return choice_buttons.get(clicked, candidates[0])
+
+    def compute_sequence_interactively(self):
+        """Steps through the safety algorithm one round at a time. Whenever
+        exactly one process is ready, it's picked automatically (no real
+        choice to make). Whenever several are ready, behavior depends on
+        the 'When Multiple Processes Are Ready' mode: prompt the user,
+        or auto-pick by ascending/descending index."""
+        mode = self.combo_scan_direction.currentIndex()  # 0=ask, 1=ascending, 2=descending
+
         work = list(self.engine.available)
-        is_safe, sequence = self.engine.check_safety_state()
+        finish = [False] * self.engine.num_processes
+        sequence = []
+
+        while len(sequence) < self.engine.num_processes:
+            candidates = self.engine.get_ready_candidates(work, finish)
+            if not candidates:
+                return False, sequence
+
+            if len(candidates) == 1:
+                chosen = candidates[0]
+            elif mode == 0:
+                chosen = self.prompt_user_for_next_process(candidates, work)
+            elif mode == 2:
+                chosen = max(candidates)
+            else:
+                chosen = min(candidates)
+
+            finish[chosen] = True
+            sequence.append(chosen)
+            for j in range(self.engine.num_resources):
+                work[j] += self.engine.allocation[chosen][j]
+
+        return True, sequence
+
+    def handle_safety_check(self):
+        # 1. DETERMINE THE SEQUENCE (prompting for ties if that mode is selected)
+        work = list(self.engine.available)
+        is_safe, sequence = self.compute_sequence_interactively()
         
         self.btn_safety.setEnabled(False)
         self.btn_apply_values.setEnabled(False)
         
-        # 2. EXPAND TABLE
+        # 2. EXPAND TABLE FOR VISUAL TRACE
         self.avail_table.blockSignals(True)
+        # +2 for "Final Target" (Row 0) and "Initial Start" (Row 1)
         self.avail_table.setRowCount(len(sequence) + 2)
         v_headers = ["Final Target", "Initial Start"] + [f"After P{p}" for p in sequence]
         self.avail_table.setVerticalHeaderLabels(v_headers)
@@ -438,8 +554,10 @@ class DeadlockSimWindow(QMainWindow):
         if is_safe:
             self.lbl_outcome_status.setText("Status: SYSTEM SAFE")
             self.lbl_outcome_status.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            
+
             for step_idx, proc_idx in enumerate(sequence):
+                self.kernel.log_kernel_event("SIM_EXEC", f"Running Process P{proc_idx}...")
+
                 QCoreApplication.processEvents()
                 time.sleep(1.0) 
 
@@ -464,51 +582,10 @@ class DeadlockSimWindow(QMainWindow):
         # Re-enable inputs
         self.btn_safety.setEnabled(True)
         self.btn_apply_values.setEnabled(True)
-        # MessageBox line removed from here
-        
-        # 2. EXPAND TABLE FOR VISUAL TRACE
-        self.avail_table.blockSignals(True)
-        # +2 for "Final Target" (Row 0) and "Initial Start" (Row 1)
-        self.avail_table.setRowCount(len(sequence) + 2)
-        v_headers = ["Final Target", "Initial Start"] + [f"After P{p}" for p in sequence]
-        self.avail_table.setVerticalHeaderLabels(v_headers)
-        
-        # Populate Static Rows (Row 0 and 1)
-        for j in range(self.engine.num_resources):
-            # Row 0: Original data (stays static)
-            self.avail_table.setItem(0, j, QTableWidgetItem(str(self.engine.available[j])))
-            # Row 1: Historical start
-            self.avail_table.setItem(1, j, QTableWidgetItem(str(self.engine.available[j])))
-            
-        self.avail_table.blockSignals(False)
 
-        # 3. STEP-BY-STEP SIMULATED PROGRESSION
-        for step_idx, proc_idx in enumerate(sequence):
-            timestamp = time.strftime("%H:%M:%S")
-            self.kernel.log_kernel_event("SIM_EXEC", f"Running Process P{proc_idx}...")
-            self.history_list_widget.addItem(f"[{timestamp}] Step {step_idx+1}: Executing P{proc_idx}")
-            self.history_list_widget.scrollToBottom()
-            
-            QCoreApplication.processEvents()
-            time.sleep(1.0) 
-
-            # MATH ON LOCAL 'work' COPY ONLY
-            for j in range(self.engine.num_resources):
-                work[j] += self.engine.allocation[proc_idx][j]
-
-            # Update trace table with 'work' values
-            self.avail_table.blockSignals(True)
-            for j in range(self.engine.num_resources):
-                step_item = QTableWidgetItem(str(work[j]))
-                step_item.setForeground(QBrush(QColor("#2ecc71")))
-                self.avail_table.setItem(step_idx + 2, j, step_item)
-            self.avail_table.blockSignals(False)
-            
-            QCoreApplication.processEvents()
-        
-        # Re-enable inputs
-        self.btn_safety.setEnabled(True)
-        self.btn_apply_values.setEnabled(True)
+        # 4. SAVE ONE HISTORY ENTRY CAPTURING THE FINAL OUTCOME OF THIS RUN
+        outcome_label = "SAFE" if is_safe else "DEADLOCK"
+        self.save_history_entry(f"Executed Simulation -> {outcome_label}")
 
     def handle_cell_edit(self, row, column):
         sender = self.sender()
@@ -542,7 +619,15 @@ class DeadlockSimWindow(QMainWindow):
             self.update_need_table_display()
             self.load_current_matrix_values_to_spinboxes()
             self.update_rag_visualization()
-            
+
+            if sender == self.avail_table:
+                cell_desc = f"Available[{chr(65+column)}]"
+            elif sender == self.alloc_table:
+                cell_desc = f"Allocation[P{row}][{chr(65+column)}]"
+            else:
+                cell_desc = f"Max Demand[P{row}][{chr(65+column)}]"
+            self.save_history_entry(f"Edited {cell_desc} -> {val}")
+
         except ValueError:
             pass 
 
@@ -661,9 +746,8 @@ class DeadlockSimWindow(QMainWindow):
         self.update_gui_tables()
         self.update_rag_visualization()
         
-        timestamp = time.strftime("%H:%M:%S")
         target_info = f"P{proc_id}" if matrix_type != 0 else "System"
-        self.history_list_widget.addItem(f"[{timestamp}] Configured {matrix_name} ({target_info}) -> {new_values}")
+        self.save_history_entry(f"Configured {matrix_name} ({target_info}) -> {new_values}")
 
     def update_need_table_display(self):
         self.need_table.blockSignals(True)
@@ -700,6 +784,7 @@ class DeadlockSimWindow(QMainWindow):
         self.rebuild_dynamic_spinboxes()
         self.update_gui_tables()
         self.load_current_matrix_values_to_spinboxes()
+        self.save_history_entry(f"Added Resource Column: {new_res_name}")
 
     def handle_remove_resource(self):
         target_res_idx = self.combo_drop_resource.currentIndex()
@@ -711,14 +796,17 @@ class DeadlockSimWindow(QMainWindow):
                 self.rebuild_dynamic_spinboxes()
                 self.update_gui_tables()
                 self.load_current_matrix_values_to_spinboxes()
+                self.save_history_entry(f"Deleted Resource Column: {res_label}")
             else:
                 QMessageBox.warning(self, "Action Denied", "System must maintain at least 1 resource column.")
 
     def handle_add_process(self):
         self.engine.add_process()
-        self.kernel.log_kernel_event("OS_SPAWN", f"Spawned custom Process P{self.engine.num_processes-1}")
+        new_proc_label = f"P{self.engine.num_processes-1}"
+        self.kernel.log_kernel_event("OS_SPAWN", f"Spawned custom Process {new_proc_label}")
         self.sync_combobox_items()
         self.update_gui_tables()
+        self.save_history_entry(f"Added Process: {new_proc_label}")
 
     def handle_remove_process(self):
         target_id = self.combo_kill_target.currentIndex()
@@ -728,8 +816,94 @@ class DeadlockSimWindow(QMainWindow):
                 self.sync_combobox_items()
                 self.update_gui_tables()
                 self.load_current_matrix_values_to_spinboxes()
+                self.save_history_entry(f"Deleted Process: P{target_id}")
             else:
                 QMessageBox.warning(self, "Action Denied", "Cannot clear baseline core system process.")
+
+    # =====================================================================
+    # HISTORY TAB: FULL-STATE SNAPSHOT + RESTORE (like a browser history)
+    # =====================================================================
+    def capture_snapshot(self):
+        """Grabs a full, independent copy of everything needed to reproduce
+        the current screen exactly: matrix sizes/values plus the last
+        simulation outcome shown in the outcome panel."""
+        return {
+            "num_processes": self.engine.num_processes,
+            "num_resources": self.engine.num_resources,
+            "available": list(self.engine.available),
+            "max_matrix": [list(row) for row in self.engine.max_matrix],
+            "allocation": [list(row) for row in self.engine.allocation],
+            "matrix_target_idx": self.combo_matrix_target.currentIndex(),
+            "proc_target_idx": self.combo_proc_target.currentIndex(),
+            "scan_direction_idx": self.combo_scan_direction.currentIndex(),
+            "outcome_status_text": self.lbl_outcome_status.text(),
+            "outcome_status_style": self.lbl_outcome_status.styleSheet(),
+            "sequence_text": self.lbl_sequence.text(),
+        }
+
+    def save_history_entry(self, description):
+        """Call this after ANY state-changing action. Stores a snapshot and
+        adds a clickable row to the history list; clicking that row later
+        reloads this exact state, no need to re-enter values."""
+        timestamp = time.strftime("%H:%M:%S")
+        self.history_snapshots.append(self.capture_snapshot())
+
+        item = QListWidgetItem(f"[{timestamp}] {description}")
+        self.history_list_widget.addItem(item)
+        self.history_list_widget.scrollToBottom()
+        self.history_list_widget.setCurrentItem(item)
+
+    def handle_history_item_clicked(self, item):
+        row = self.history_list_widget.row(item)
+        if row < 0 or row >= len(self.history_snapshots):
+            return
+        self.restore_snapshot(self.history_snapshots[row])
+
+    def restore_snapshot(self, snapshot):
+        """Rebuilds the engine and every widget on screen from a stored
+        snapshot: matrices, process/resource counts, dropdown selections,
+        the outcome banner, and the RAG diagram."""
+        self.engine.num_processes = snapshot["num_processes"]
+        self.engine.num_resources = snapshot["num_resources"]
+        self.engine.available = list(snapshot["available"])
+        self.engine.max_matrix = [list(row) for row in snapshot["max_matrix"]]
+        self.engine.allocation = [list(row) for row in snapshot["allocation"]]
+        self.engine.calculate_need_matrix()
+
+        self.sync_combobox_items()
+        self.rebuild_dynamic_spinboxes()
+        self.update_gui_tables()  # also redraws the RAG
+
+        self.combo_matrix_target.blockSignals(True)
+        self.combo_matrix_target.setCurrentIndex(snapshot["matrix_target_idx"])
+        self.combo_matrix_target.blockSignals(False)
+        self.proc_select_row_widget.setVisible(snapshot["matrix_target_idx"] != 0)
+
+        self.combo_proc_target.blockSignals(True)
+        if 0 <= snapshot["proc_target_idx"] < self.combo_proc_target.count():
+            self.combo_proc_target.setCurrentIndex(snapshot["proc_target_idx"])
+        self.combo_proc_target.blockSignals(False)
+
+        self.load_current_matrix_values_to_spinboxes()
+
+        self.combo_scan_direction.blockSignals(True)
+        self.combo_scan_direction.setCurrentIndex(snapshot.get("scan_direction_idx", 0))
+        self.combo_scan_direction.blockSignals(False)
+
+        self.lbl_outcome_status.setText(snapshot["outcome_status_text"])
+        self.lbl_outcome_status.setStyleSheet(snapshot["outcome_status_style"])
+        self.lbl_sequence.setText(snapshot["sequence_text"])
+
+        self.kernel.log_kernel_event("HISTORY", "Restored full state from a saved history entry.")
+
+    def handle_clear_history(self):
+        confirm = QMessageBox.question(
+            self, "Clear History", "Delete all saved history entries? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.history_list_widget.clear()
+            self.history_snapshots.clear()
 
 
 if __name__ == "__main__":
