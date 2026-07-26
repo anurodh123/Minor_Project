@@ -1,24 +1,3 @@
-"""
-Disk Scheduling + Virtual File System Simulator — PyQt6 Edition
-==================================================================
-Tab 1 "Disk Scheduler": simulates and visualizes six classical disk
-scheduling algorithms (FCFS, SSTF, SCAN, C-SCAN, LOOK, C-LOOK).
-
-Tab 2 "Virtual File System": a mock VFS driven by a small command-line
-interface (mkdir, touch, ls, cd, rm, write, cat, tree, diskmap, format).
-Every file is allocated a set of simulated disk blocks (cylinders) on
-creation/growth. Running `cat <file>` treats that file's block list as
-a disk-scheduler request queue, switches to the Disk Scheduler tab, and
-plots the resulting head-movement trace — closing the loop between the
-file system and the disk scheduler, end to end.
-
-Requirements:
-    pip install PyQt6 matplotlib
-
-Run:
-    python disk_scheduling_pyqt6.py
-"""
-
 import sys
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -58,11 +37,11 @@ def sstf(requests, head, **kwargs):
     return order, total, path
 
 
-def scan(requests, head, disk_size=200, direction="up", **kwargs):
+def scan(requests, head, disk_size=200, direction="right", **kwargs):
     reqs = sorted(requests)
     upper = [r for r in reqs if r >= head]
     lower = [r for r in reqs if r < head]
-    if direction == "up":
+    if direction == "right":
         path = upper + [disk_size - 1] + list(reversed(lower))
     else:
         path = list(reversed(lower)) + [0] + upper
@@ -77,11 +56,11 @@ def scan(requests, head, disk_size=200, direction="up", **kwargs):
     return order, total, full_path
 
 
-def c_scan(requests, head, disk_size=200, direction="up", **kwargs):
+def c_scan(requests, head, disk_size=200, direction="right", **kwargs):
     reqs = sorted(requests)
     upper = [r for r in reqs if r >= head]
     lower = [r for r in reqs if r < head]
-    if direction == "up":
+    if direction == "right":
         path = upper + [disk_size - 1, 0] + lower
     else:
         path = list(reversed(lower)) + [0, disk_size - 1] + list(reversed(upper))
@@ -96,11 +75,11 @@ def c_scan(requests, head, disk_size=200, direction="up", **kwargs):
     return order, total, full_path
 
 
-def look(requests, head, direction="up", **kwargs):
+def look(requests, head, direction="right", **kwargs):
     reqs = sorted(requests)
     upper = [r for r in reqs if r >= head]
     lower = [r for r in reqs if r < head]
-    path = upper + list(reversed(lower)) if direction == "up" else list(reversed(lower)) + upper
+    path = upper + list(reversed(lower)) if direction == "right" else list(reversed(lower)) + upper
     order, total, cur = [], 0, head
     full_path = [head]
     for pos in path:
@@ -111,11 +90,11 @@ def look(requests, head, direction="up", **kwargs):
     return order, total, full_path
 
 
-def c_look(requests, head, direction="up", **kwargs):
+def c_look(requests, head, direction="right", **kwargs):
     reqs = sorted(requests)
     upper = [r for r in reqs if r >= head]
     lower = [r for r in reqs if r < head]
-    path = upper + lower if direction == "up" else list(reversed(lower)) + list(reversed(upper))
+    path = upper + lower if direction == "right" else list(reversed(lower)) + list(reversed(upper))
     order, total, cur = [], 0, head
     full_path = [head]
     for pos in path:
@@ -409,13 +388,13 @@ class DiskSchedulerWindow(QMainWindow):
 
         dir_row = QHBoxLayout()
         self.dir_group = QButtonGroup(self)
-        self.dir_up = QRadioButton("Up (toward higher cylinders)")
-        self.dir_down = QRadioButton("Down (toward lower cylinders)")
-        self.dir_up.setChecked(True)
-        self.dir_group.addButton(self.dir_up)
-        self.dir_group.addButton(self.dir_down)
-        dir_row.addWidget(self.dir_up)
-        dir_row.addWidget(self.dir_down)
+        self.dir_right = QRadioButton("Right (toward higher cylinders)")
+        self.dir_left = QRadioButton("Left (toward lower cylinders)")
+        self.dir_right.setChecked(True)
+        self.dir_group.addButton(self.dir_right)
+        self.dir_group.addButton(self.dir_left)
+        dir_row.addWidget(self.dir_right)
+        dir_row.addWidget(self.dir_left)
         form.addRow("Direction (SCAN family):", dir_row)
 
         self.algo_combo = QComboBox()
@@ -469,7 +448,7 @@ class DiskSchedulerWindow(QMainWindow):
         for r in requests:
             if r < 0 or r >= disk_size:
                 raise ValueError(f"Request {r} lies outside the valid range [0, {disk_size - 1}].")
-        direction = "up" if self.dir_up.isChecked() else "down"
+        direction = "right" if self.dir_right.isChecked() else "left"
         return disk_size, head, requests, direction
 
     def _plot_single(self, name, path, disk_size, total):
