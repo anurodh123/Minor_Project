@@ -57,7 +57,7 @@ pip install -r requirements.txt
 Run the application with:
 
 ```bash
-python disk_scheduler.py
+python try.py
 ```
 
 ### Disk Scheduler tab
