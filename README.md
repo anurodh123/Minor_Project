@@ -24,14 +24,6 @@ A PyQt6 desktop application that visualizes classic disk-scheduling algorithms a
 - `cat <file> --all` compares all six algorithms against that file's blocks in one go
 - A visual free/used block bitmap (`diskmap`) and full directory tree printout (`tree`)
 
-## Screenshots
-
-> Add screenshots of the app here, e.g.:
->
-> ```markdown
-> ![Disk Scheduler tab](docs/screenshot-scheduler.png)
-> ![Virtual File System tab](docs/screenshot-vfs.png)
-> ```
 
 ## Requirements
 
