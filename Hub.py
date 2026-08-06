@@ -1,5 +1,10 @@
 import streamlit as st
-from deadlock_sim import avash
+from pathlib import Path
+import base64
+from deadlock_sim import avash      #name of function that runs the whole deadlock simulation
+from cpu_scheduler import din       #name of function that runs the whole cpu scheduling simulation
+from Virtual_memory import anurodh
+from Paging_module import aseem
 
 st.set_page_config(
     page_title="OS Simulator",
@@ -15,16 +20,32 @@ if "active_module" not in st.session_state:
 def navigate_to(module_name):
     st.session_state.active_module = module_name
 
+def png_as_data_uri(image_path):
+    image_bytes = image_path.read_bytes()
+    encoded_image = base64.b64encode(
+        image_bytes
+    ).decode("utf-8")
+
+    return (
+        "data:image/png;base64,"
+        + encoded_image
+    )
+
 with st.sidebar:
+
+    logo_path = Path(__file__).parent/ "logoSidebar.png"
+    if logo_path.exists():
+        logo_uri = png_as_data_uri(logo_path)
+
     st.markdown(
-        """
-        <div style="background-color:#4F3E6D; padding:15px; border-radius:10px; text-align:center; margin-bottom:20px;">
-            <!-- logo above simulation to be added -->
-            <h1 style="color:#FDC215; margin:0; font-family:sans-serif; font-size:24px; letter-spacing:1px;">
+    f"""
+    <div style="background-color:#4F3E6D; padding:15px; border-radius:10px; text-align:center; margin-bottom:20px;">
+        <img src="{logo_uri}" style="width:150px; height:auto; display:block; margin:0 auto 0px auto;">
+        <h1 style="color:#FDC215; margin:0; font-family:sans-serif; font-size:24px; letter-spacing:1px;">
                 SIMULATOR
-            </h1>
-        </div>
-        """, 
+        </h1>
+    </div>
+    """, 
         unsafe_allow_html=True
     )
     st.write("### Quick Access Links")
@@ -34,9 +55,9 @@ with st.sidebar:
     st.divider()
     st.caption("Simulation Modules:")
     if st.button("CPU Scheduler", use_container_width=True):
-        st.write("to be implemented")
+        navigate_to("cpu")
     if st.button("Virtual Memory", use_container_width=True):
-        st.write("to be implemented")
+        navigate_to("disk")
     if st.button("Deadlock Engine", use_container_width=True):
         navigate_to("deadlock_sim.py")
     if st.button("VFS & Disk Manager", use_container_width=True):
@@ -77,15 +98,13 @@ elif st.session_state.active_module == "cpu":
     st.title("CPU Scheduling Simulation Workspace")
     if st.button("Return to Main Menu"): navigate_to("Hub"); st.rerun()
     st.divider()
-    # scheduling to be implemented
-    st.info("to be implemented")
+    din()
 
 elif st.session_state.active_module == "memory":
     st.title("Virtual Memory & Demand Paging Workspace")
     if st.button("Return to Main Menu"): navigate_to("Hub"); st.rerun()
     st.divider()
-    # paging to be implemented
-    st.success("to be implemented")
+    aseem()
 
 
 # ROUTE: DEADLOCK ENGINE WORKSPACE
@@ -94,10 +113,10 @@ elif st.session_state.active_module == "deadlock_sim.py":
     if st.button("Return to Main Menu"): navigate_to("Hub"); st.rerun()
     st.divider()
     avash()
+    # a previous functional version was being used but is no longer used because of graphics mismatch (the graph was not implemented)
 
 elif st.session_state.active_module == "disk":
     st.title("VFS & Disk Scheduling Workspace")
     if st.button("Return to Main Menu"): navigate_to("Hub"); st.rerun()
     st.divider()
-    # Disk scheduling module to be implemented
-    st.error("to be implemented")
+    anurodh()
