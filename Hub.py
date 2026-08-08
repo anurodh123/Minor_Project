@@ -56,12 +56,12 @@ with st.sidebar:
     st.caption("Simulation Modules:")
     if st.button("CPU Scheduler", use_container_width=True):
         navigate_to("cpu")
-    if st.button("Virtual Memory", use_container_width=True):
+    if st.button("Virtual Memory simulations", use_container_width=True):
         navigate_to("disk")
     if st.button("Deadlock Engine", use_container_width=True):
         navigate_to("deadlock_sim.py")
-    if st.button("VFS & Disk Manager", use_container_width=True):
-        st.write("to be implemented")
+    if st.button("Paging Simulation", use_container_width=True):
+        navigate_to("memory")
     
 if st.session_state.active_module == "Hub":
     st.title("OS Simulation Menu")
@@ -71,7 +71,7 @@ if st.session_state.active_module == "Hub":
     
     with col1:
         st.info("### CPU Scheduling")
-        st.write("Simulating task scheduling in a CPU to investigate efficiency of FCFS, SJF, and Round Robin scheduling algorithms with and without preemption.")
+        st.write("Simulating task scheduling in a CPU using FCFS, SJF, and Round Robin scheduling algorithms.")
         if st.button("Launch CPU Module", key="btn_cpu", use_container_width=True):
             navigate_to("cpu")
             st.rerun()
