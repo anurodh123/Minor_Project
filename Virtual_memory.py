@@ -1164,10 +1164,11 @@ def anurodh():
 
         vfs = st.session_state.vfs_object
 
-        scheduler_tab, filesystem_tab = st.tabs(
+        scheduler_tab, filesystem_tab, learn_tab = st.tabs(
             [
                 "Disk Scheduler",
-                "Virtual File System"
+                "Virtual File System",
+                "Learn"
             ]
         )
 
@@ -1472,4 +1473,307 @@ def anurodh():
                     last_access["disk_size"],
                     last_access["total"]
                 )
+        with learn_tab:
+            st.subheader("Learn About Disk Scheduling and File Systems")
+
+            st.write(
+                "This module combines two related operating-system topics: "
+                "disk scheduling, which decides the order of storage requests, "
+                "and virtual file systems, which provide a consistent way for "
+                "programs to access files and directories."
+            )
+
+            st.markdown("## Disk Scheduling")
+
+            st.write(
+                "Disk scheduling algorithms determine the order in which "
+                "pending disk requests are serviced. Their main goals are to "
+                "reduce head movement, improve response time, and prevent "
+                "requests from waiting indefinitely."
+            )
+
+            st.markdown("### How disk scheduling works")
+
+            st.markdown(
+                """
+                1. The disk head starts at an initial track.
+                2. The request queue contains pending track requests.
+                3. The selected algorithm chooses the next request.
+                4. The disk head moves to that track.
+                5. The simulator records the movement and updates the queue.
+                6. The process repeats until all requests are serviced.
+                """
+            )
+
+            st.markdown("### Disk scheduling concepts")
+
+            scheduler_topics = {
+                "Disk Request": (
+                    "A disk request asks the storage device to read from or "
+                    "write to a particular track."
+                ),
+                "Track": (
+                    "A track is a circular path on a disk. In the simulator, "
+                    "requests are usually represented by track numbers."
+                ),
+                "Disk Head": (
+                    "The disk head is the mechanism that reads data from or "
+                    "writes data to the selected track."
+                ),
+                "Seek Time": (
+                    "Seek time is the time required for the disk head to move "
+                    "to the requested track."
+                ),
+                "Head Movement": (
+                    "Head movement is the distance travelled by the disk head "
+                    "between consecutive requests."
+                ),
+                "Total Head Movement": (
+                    "This is the sum of all movements made by the disk head. "
+                    "Lower movement generally means lower seek overhead."
+                ),
+                "Starvation": (
+                    "Starvation occurs when a request waits for a very long "
+                    "time because other requests are repeatedly chosen first."
+                ),
+            }
+
+            scheduler_items = list(scheduler_topics.items())
+
+            for index in range(0, len(scheduler_items), 2):
+                left_column, right_column = st.columns(2)
+
+                for column, (title, explanation) in zip(
+                    (left_column, right_column),
+                    scheduler_items[index:index + 2]
+                ):
+                    with column:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"""
+                                <span style="
+                                    color:#5FB8B0;
+                                    font-weight:700;
+                                    font-size:15px;
+                                ">
+                                    {title}
+                                </span>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            st.markdown(
+                                f"""
+                                <span style="
+                                    color:#C7CBD9;
+                                    font-size:14px;
+                                ">
+                                    {explanation}
+                                </span>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+            st.markdown("### Disk scheduling algorithms")
+
+            disk_algorithms = {
+                "FCFS — First-Come, First-Served": (
+                    "Services requests in their arrival order. It is simple "
+                    "and fair, but it can cause large amounts of head movement."
+                ),
+                "SSTF — Shortest Seek Time First": (
+                    "Chooses the request closest to the current head position. "
+                    "It often reduces movement but can starve requests located "
+                    "far away."
+                ),
+                "SCAN — Elevator Algorithm": (
+                    "Moves in one direction while servicing requests, then "
+                    "reverses direction. It provides more predictable waiting "
+                    "times than SSTF."
+                ),
+                "C-SCAN — Circular SCAN": (
+                    "Services requests in one direction only. After reaching "
+                    "the end, the head returns to the beginning and continues."
+                ),
+                "LOOK": (
+                    "Works like SCAN, but reverses at the last pending request "
+                    "instead of travelling all the way to the physical disk end."
+                ),
+                "C-LOOK": (
+                    "Works like C-SCAN, but jumps from the last request in one "
+                    "direction to the first request in the other direction."
+                ),
+            }
+
+            for algorithm, explanation in disk_algorithms.items():
+                with st.expander(algorithm):
+                    st.write(explanation)
+
+            st.latex(
+                r"\text{Total Head Movement} = "
+                r"\sum_{i=1}^{n} |H_i - H_{i-1}|"
+            )
+
+            st.divider()
+
+            st.markdown("## Virtual File System")
+
+            st.write(
+                "A virtual file system, or VFS, is an abstraction layer that "
+                "gives applications a common interface for working with files "
+                "and directories. Applications can use operations such as "
+                "open, read, write, and close without needing to know the "
+                "specific details of the underlying file system."
+            )
+
+            st.markdown("### How the virtual file system works")
+
+            st.markdown(
+                """
+                1. An application requests a file operation.
+                2. The operating system passes the request to the VFS layer.
+                3. The VFS identifies the mounted file system involved.
+                4. The appropriate file-system implementation performs the operation.
+                5. The result is returned to the application.
+                """
+            )
+
+            st.markdown("### Virtual file system concepts")
+
+            vfs_topics = {
+                "File": (
+                    "A file is a named collection of data stored by the "
+                    "operating system."
+                ),
+                "Directory": (
+                    "A directory stores references to files and other "
+                    "directories, allowing data to be organized hierarchically."
+                ),
+                "Path": (
+                    "A path identifies the location of a file or directory. "
+                    "An absolute path starts from the root, while a relative "
+                    "path starts from the current directory."
+                ),
+                "Root Directory": (
+                    "The root directory is the top-level directory in the "
+                    "file-system hierarchy."
+                ),
+                "Mount Point": (
+                    "A mount point is a directory where another file system "
+                    "is attached and made accessible."
+                ),
+                "File Descriptor": (
+                    "A file descriptor is a process-specific integer used by "
+                    "the operating system to identify an open file."
+                ),
+                "Inode": (
+                    "An inode stores metadata about a file, such as its type, "
+                    "permissions, owner, size, and disk-block locations."
+                ),
+                "File Metadata": (
+                    "Metadata includes information such as file size, access "
+                    "permissions, timestamps, and ownership."
+                ),
+                "Permissions": (
+                    "Permissions control which users may read, write, or "
+                    "execute a file."
+                ),
+                "Open File Table": (
+                    "The open file table stores information about files that "
+                    "are currently open, including their access position."
+                ),
+            }
+
+            vfs_items = list(vfs_topics.items())
+
+            for index in range(0, len(vfs_items), 2):
+                left_column, right_column = st.columns(2)
+
+                for column, (title, explanation) in zip(
+                    (left_column, right_column),
+                    vfs_items[index:index + 2]
+                ):
+                    with column:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"""
+                                <span style="
+                                    color:#5FB8B0;
+                                    font-weight:700;
+                                    font-size:15px;
+                                ">
+                                    {title}
+                                </span>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            st.markdown(
+                                f"""
+                                <span style="
+                                    color:#C7CBD9;
+                                    font-size:14px;
+                                ">
+                                    {explanation}
+                                </span>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+            st.markdown("### Common VFS operations")
+
+            vfs_operations = {
+                "Create": (
+                    "Creates a new file or directory entry."
+                ),
+                "Open": (
+                    "Locates a file and creates an entry in the process's "
+                    "open-file table."
+                ),
+                "Read": (
+                    "Copies data from a file into a process buffer."
+                ),
+                "Write": (
+                    "Copies data from a process buffer into a file."
+                ),
+                "Seek": (
+                    "Changes the current read/write position within an open file."
+                ),
+                "Close": (
+                    "Releases the process's reference to an open file."
+                ),
+                "Delete": (
+                    "Removes a directory entry and eventually releases the "
+                    "file's storage blocks."
+                ),
+            }
+
+            for operation, explanation in vfs_operations.items():
+                with st.expander(operation):
+                    st.write(explanation)
+
+            st.markdown("### Disk scheduling versus virtual file systems")
+
+            comparison = {
+                "Main purpose": (
+                    "Disk scheduling optimizes the order of physical storage "
+                    "requests, while the VFS provides a common interface for "
+                    "file operations."
+                ),
+                "Works with": (
+                    "Disk scheduling works with tracks and disk-head positions. "
+                    "The VFS works with files, directories, paths, metadata, "
+                    "and file descriptors."
+                ),
+                "Main concern": (
+                    "Disk scheduling focuses on seek time and fairness. "
+                    "The VFS focuses on organization, abstraction, protection, "
+                    "and access consistency."
+                ),
+            }
+
+            for title, explanation in comparison.items():
+                st.markdown(f"**{title}**")
+                st.write(explanation)
+        
     disk_module()

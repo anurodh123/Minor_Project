@@ -1059,7 +1059,182 @@ def din():
                 st.session_state.cpu_history = []
                 st.session_state.pop("cpu_current", None)
                 st.rerun()
+    def render_cpu_learn_tab():
+        st.subheader("Learn About CPU Scheduling")
 
+        st.write(
+            "CPU scheduling determines which ready process receives "
+            "the processor next. Different algorithms optimize different "
+            "goals, such as low waiting time, fairness, or fast response."
+        )
+
+        st.markdown("#### How this simulator works")
+
+        st.markdown(
+            """
+            1. **Arrival time** determines when a process enters the ready queue.
+            2. **Burst time** determines how long the process needs the CPU.
+            3. The selected scheduling algorithm chooses the next process.
+            4. The simulator builds a Gantt timeline.
+            5. Completion, turnaround, and waiting times are calculated.
+            """
+        )
+
+        st.markdown("#### Core Concepts")
+
+        topics = {
+            "Process": (
+                "A process is a program currently being executed. "
+                "In this simulator, each process has an ID, arrival time, "
+                "burst time, and optional priority."
+            ),
+            "Arrival Time": (
+                "The time at which a process enters the ready queue and "
+                "becomes eligible for CPU scheduling."
+            ),
+            "Burst Time": (
+                "The amount of CPU time required by a process to complete "
+                "its execution."
+            ),
+            "Completion Time": (
+                "The time at which a process finishes execution."
+            ),
+            "Turnaround Time": (
+                "Turnaround Time = Completion Time − Arrival Time. "
+                "It measures the total time spent in the system."
+            ),
+            "Waiting Time": (
+                "Waiting Time = Turnaround Time − Burst Time. "
+                "It measures how long a process waited in the ready queue."
+            ),
+            "Preemption": (
+                "Preemption occurs when the operating system interrupts a "
+                "running process and gives the CPU to another process."
+            ),
+            "Gantt Chart": (
+                "A Gantt chart shows the order and duration of CPU execution "
+                "for every process, including idle periods."
+            ),
+            "Starvation": (
+                "Starvation occurs when a process waits indefinitely because "
+                "other processes are repeatedly selected first."
+            ),
+            "Context Switch": (
+                "A context switch occurs when the CPU changes from one "
+                "process to another. It allows multitasking but adds overhead."
+            ),
+        }
+        def render_topic_cards(topics):
+            """
+            Display educational topics as two-column cards.
+
+            topics must be a dictionary in this format:
+            {
+                "Topic title": "Topic explanation",
+                ...
+            }
+            """
+
+            topic_items = list(topics.items())
+
+            for index in range(0, len(topic_items), 2):
+                left_column, right_column = st.columns(2)
+
+                pair = topic_items[index:index + 2]
+
+                for column, (title, explanation) in zip(
+                    (left_column, right_column),
+                    pair
+                ):
+                    with column:
+                        with st.container(border=True):
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    color:#5FB8B0;
+                                    font-weight:700;
+                                    font-size:15px;
+                                    margin-bottom:6px;
+                                ">
+                                    {title}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    color:#C7CBD9;
+                                    font-size:14px;
+                                    line-height:1.5;
+                                    margin-bottom:12px;
+                                ">
+                                    {explanation}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+        render_topic_cards(topics)
+
+        st.markdown("#### Algorithm Reference")
+
+        algorithm_info = {
+            "FCFS": (
+                "First-Come, First-Served runs processes in arrival order. "
+                "It is simple and non-preemptive, but a long process can "
+                "make every process behind it wait."
+            ),
+            "SJF (Non-Preemptive)": (
+                "Shortest Job First selects the available process with the "
+                "smallest burst time and runs it until completion."
+            ),
+            "SJF (Preemptive)": (
+                "Preemptive SJF, also called SRTF, can interrupt the current "
+                "process when another process has a shorter remaining time."
+            ),
+            "Round Robin": (
+                "Round Robin gives each process a fixed time quantum. "
+                "It is fair and useful for interactive systems."
+            ),
+            "Priority (Non-Preemptive)": (
+                "The available process with the highest priority runs until "
+                "completion. Priority may be represented by either a lower "
+                "or higher numerical value."
+            ),
+            "Priority (Preemptive)": (
+                "A running process can be interrupted when a higher-priority "
+                "process arrives."
+            ),
+            "Highest Response Ratio Next (HRRN)": (
+                "HRRN selects the process with the highest response ratio: "
+                "(Waiting Time + Burst Time) / Burst Time. "
+                "It balances short jobs with starvation prevention."
+            ),
+        }
+
+        for algorithm, explanation in algorithm_info.items():
+            with st.expander(algorithm):
+                st.write(explanation)
+
+        st.markdown("#### Performance Metrics")
+
+        st.latex(
+            r"\text{Turnaround Time} = "
+            r"\text{Completion Time} - \text{Arrival Time}"
+        )
+
+        st.latex(
+            r"\text{Waiting Time} = "
+            r"\text{Turnaround Time} - \text{Burst Time}"
+        )
+
+        st.write(
+            "The best algorithm depends on the workload. SJF often reduces "
+            "average waiting time, while Round Robin generally provides "
+            "better fairness and responsiveness."
+        )
 
     def loader():
         """
@@ -1356,4 +1531,16 @@ def din():
             )
 
         show_history()
-    loader()
+
+    simulation_tab, learn_tab = st.tabs(
+        [
+           "Simulate",
+            "Learn"
+        ]
+    )
+
+    with simulation_tab:
+        loader()
+
+    with learn_tab:
+        render_cpu_learn_tab()

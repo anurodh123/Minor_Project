@@ -528,7 +528,7 @@ def render_resource_allocation_graph(engine):
 # Main Streamlit module
 # ============================================================
 
-def avash():
+def render_deadlock_simulation():
     initialize_deadlock_state()
 
     engine = get_engine()
@@ -916,3 +916,177 @@ def avash():
                 st.rerun()
         else:
             st.info("No saved history entries yet.")
+
+def render_deadlock_learn_tab():
+    st.subheader("Learn About Deadlock Avoidance")
+
+    st.write(
+        "Deadlock occurs when processes wait forever for resources "
+        "held by one another. Banker's Algorithm checks whether a "
+        "resource allocation keeps the system in a safe state."
+    )
+
+    st.markdown("#### How this simulator works")
+
+    st.markdown(
+        """
+        1. The system starts with an Available resource vector.
+        2. Each process has an Allocation vector.
+        3. Each process has a Maximum Demand vector.
+        4. Need is calculated as Maximum − Allocation.
+        5. The safety algorithm searches for a process whose Need can "
+           "be satisfied by the current Available/Work vector.
+        6. When that process finishes, its allocated resources are "
+           "returned to Work.
+        7. If every process can finish, the system is safe.
+        8. If no unfinished process can proceed, a deadlock is detected.
+        """
+    )
+
+    st.markdown("#### Core Concepts")
+
+    topics = {
+        "Deadlock": (
+            "A deadlock is a state where every process in a group is "
+            "waiting for a resource that another process in the group holds."
+        ),
+        "Available": (
+            "Available represents the number of currently unused "
+            "instances of each resource type."
+        ),
+        "Allocation": (
+            "Allocation shows how many instances of each resource are "
+            "currently assigned to each process."
+        ),
+        "Maximum Demand": (
+            "Maximum Demand shows the largest number of each resource "
+            "that a process may need during its lifetime."
+        ),
+        "Need": (
+            "Need = Maximum Demand − Allocation. It represents the "
+            "remaining resources required by each process."
+        ),
+        "Safe State": (
+            "A state is safe when there is at least one order in which "
+            "all processes can finish without causing deadlock."
+        ),
+        "Unsafe State": (
+            "An unsafe state does not guarantee that deadlock has already "
+            "occurred, but the system can no longer guarantee safe completion."
+        ),
+        "Safe Sequence": (
+            "A safe sequence is an order of processes in which every "
+            "process can obtain its remaining resources and finish."
+        ),
+        "Banker's Algorithm": (
+            "Banker's Algorithm simulates possible future allocations "
+            "before granting resources. It only permits allocations that "
+            "keep the system safe."
+        ),
+        "Resource Allocation Graph": (
+            "A Resource Allocation Graph represents processes, resources, "
+            "allocations, and outstanding resource requests."
+        ),
+    }
+
+    def render_topic_cards(topics):
+        """
+        Display educational topics as two-column cards.
+
+        topics must be a dictionary in this format:
+        {
+            "Topic title": "Topic explanation",
+            ...
+        }
+        """
+
+        topic_items = list(topics.items())
+
+        for index in range(0, len(topic_items), 2):
+            left_column, right_column = st.columns(2)
+
+            pair = topic_items[index:index + 2]
+
+            for column, (title, explanation) in zip(
+                (left_column, right_column),
+                pair
+            ):
+                with column:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"""
+                            <div style="
+                                color:#5FB8B0;
+                                font-weight:700;
+                                font-size:15px;
+                                margin-bottom:6px;
+                            ">
+                                {title}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        st.markdown(
+                            f"""
+                            <div style="
+                                color:#C7CBD9;
+                                font-size:14px;
+                                line-height:1.5;
+                                margin-bottom:12px;
+                            ">
+                                {explanation}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+    render_topic_cards(topics)
+
+    st.markdown("#### Banker's Algorithm Procedure")
+
+    with st.expander("Safety-check pseudocode"):
+        st.code(
+            """Work = Available
+Finish[i] = False for every process
+
+while some process can still finish:
+    find an unfinished process i where Need[i] <= Work
+    Work = Work + Allocation[i]
+    Finish[i] = True
+    add i to the safe sequence
+
+if every Finish[i] is True:
+    the system is safe
+else:
+    deadlock or unsafe state detected
+""",
+            language="text"
+        )
+
+    st.markdown("#### Important Relationships")
+
+    st.latex(
+        r"\text{Need}_{i,j} = "
+        r"\text{Max}_{i,j} - \text{Allocation}_{i,j}"
+    )
+
+    st.write(
+        "The simulator allows you to edit the matrices, add or remove "
+        "processes and resources, run safety checks, inspect the "
+        "Resource Allocation Graph, and restore previous states."
+    )
+
+def avash():
+    simulation_tab, learn_tab = st.tabs(
+        [
+            "Simulate",
+            "Learn"
+        ]
+    )
+
+    with simulation_tab:
+        render_deadlock_simulation()
+
+    with learn_tab:
+        render_deadlock_learn_tab()

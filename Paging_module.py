@@ -1,6 +1,8 @@
+import time
 from io import BytesIO
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from Page_backend import (
@@ -55,7 +57,7 @@ def step_dataframe(result, algorithm):
                 "Victim": (
                     "-"
                     if step["evicted_page"] is None
-                    else step["evicted_page"]
+                    else str(step["evicted_page"])
                 ),
                 "Action": action,
             }
@@ -412,6 +414,9 @@ def render_simulation_tab():
     if "paging_refs" not in st.session_state:
         st.session_state.paging_refs = default_refs
 
+    if "paging_reference_input" not in st.session_state:
+        st.session_state.paging_reference_input = default_refs
+
     if "paging_frames" not in st.session_state:
         st.session_state.paging_frames = 3
 
@@ -424,12 +429,27 @@ def render_simulation_tab():
     if "paging_cursor" not in st.session_state:
         st.session_state.paging_cursor = -1
 
+    if "paging_playing" not in st.session_state:
+        st.session_state.paging_playing = False
+
+    if "paging_speed_label" not in st.session_state:
+        st.session_state.paging_speed_label = "Normal"
+
+    # A widget's session_state key cannot be written to after that widget
+    # has already been instantiated in the same script run. To let the
+    # "Generate Random References" button push a new value into the
+    # reference-string box, it stores the new text in a "pending" slot and
+    # reruns; this block applies that pending value *before* the text_input
+    # below is created, which is what actually makes the button work.
+    if "paging_pending_refs" in st.session_state:
+        st.session_state.paging_refs = st.session_state.pop("paging_pending_refs")
+        st.session_state.paging_reference_input = st.session_state.paging_refs
+
     left, middle, right = st.columns([2, 1, 2])
 
     with left:
         reference_text = st.text_input(
             "Reference string",
-            value=st.session_state.paging_refs,
             key="paging_reference_input"
         )
 
@@ -477,6 +497,7 @@ def render_simulation_tab():
         )
 
     with generate_right:
+        st.write("")
         if st.button(
             "Generate Random References",
             use_container_width=True,
@@ -488,49 +509,26 @@ def render_simulation_tab():
                     int(random_max)
                 )
 
-                st.session_state.paging_refs = (
-                    ",".join(str(x) for x in generated)
-                )
+                new_refs = ",".join(str(x) for x in generated)
 
+                # Don't touch paging_refs / paging_reference_input directly
+                # here — the reference_text widget above has already been
+                # instantiated this run. Stash the value and rerun; the
+                # pending-refs block at the top of this function applies it
+                # on the next run, before the widget is recreated.
+                st.session_state.paging_pending_refs = new_refs
+                st.session_state.paging_playing = False
                 st.rerun()
 
             except ValidationError as error:
                 st.error(str(error))
 
-    run_left, run_middle, run_right = st.columns(3)
-
-    with run_left:
-        run_clicked = st.button(
-            "Run Simulation",
-            type="primary",
-            use_container_width=True,
-            key="paging_run"
-        )
-
-    with run_middle:
-        if st.button(
-            "Restart Steps",
-            use_container_width=True,
-            key="paging_restart"
-        ):
-            st.session_state.paging_cursor = -1
-            st.rerun()
-
-    with run_right:
-        if st.button(
-            "Next Step",
-            use_container_width=True,
-            key="paging_next"
-        ):
-            result = st.session_state.paging_result
-
-            if result:
-                st.session_state.paging_cursor = min(
-                    st.session_state.paging_cursor + 1,
-                    len(result["steps"]) - 1
-                )
-
-                st.rerun()
+    run_clicked = st.button(
+        "Run Simulation",
+        type="primary",
+        use_container_width=True,
+        key="paging_run"
+    )
 
     if run_clicked:
         try:
@@ -548,7 +546,8 @@ def render_simulation_tab():
             st.session_state.paging_frames = int(frame_count)
             st.session_state.paging_algorithm = algorithm_key
             st.session_state.paging_result = result
-            st.session_state.paging_cursor = -1
+            st.session_state.paging_cursor = 0
+            st.session_state.paging_playing = False
 
         except ValidationError as error:
             st.error(str(error))
@@ -564,6 +563,92 @@ def render_simulation_tab():
 
     if st.session_state.paging_cursor < 0:
         st.session_state.paging_cursor = 0
+
+    total_steps = len(result["steps"])
+    at_last_step = st.session_state.paging_cursor >= total_steps - 1
+
+    if at_last_step:
+        st.session_state.paging_playing = False
+
+    st.markdown("##### Playback controls")
+
+    restart_col, prev_col, play_col, next_col, speed_col = st.columns(
+        [1, 1, 1.2, 1, 1.6]
+    )
+
+    with restart_col:
+        if st.button(
+            "⟲ Restart",
+            use_container_width=True,
+            key="paging_restart"
+        ):
+            st.session_state.paging_cursor = 0
+            st.session_state.paging_playing = False
+            st.rerun()
+
+    with prev_col:
+        if st.button(
+            "◀ Previous",
+            use_container_width=True,
+            key="paging_prev",
+            disabled=st.session_state.paging_cursor <= 0
+        ):
+            st.session_state.paging_playing = False
+            st.session_state.paging_cursor = max(
+                st.session_state.paging_cursor - 1, 0
+            )
+            st.rerun()
+
+    with play_col:
+        is_playing = st.session_state.paging_playing
+        play_label = "⏸ Pause" if is_playing else "▶ Play"
+
+        if st.button(
+            play_label,
+            use_container_width=True,
+            type="primary",
+            key="paging_play_pause",
+            disabled=at_last_step and not is_playing
+        ):
+            st.session_state.paging_playing = not is_playing
+            st.rerun()
+
+    with next_col:
+        if st.button(
+            "Next ▶",
+            use_container_width=True,
+            key="paging_next",
+            disabled=at_last_step
+        ):
+            st.session_state.paging_playing = False
+            st.session_state.paging_cursor = min(
+                st.session_state.paging_cursor + 1,
+                total_steps - 1
+            )
+            st.rerun()
+
+    with speed_col:
+        speed_label = st.select_slider(
+            "Playback speed",
+            options=["Slow", "Normal", "Fast", "Very fast"],
+            value=st.session_state.paging_speed_label,
+            key="paging_speed_label"
+        )
+
+    speed_seconds = {
+        "Slow": 1.4,
+        "Normal": 0.9,
+        "Fast": 0.5,
+        "Very fast": 0.25,
+    }[speed_label]
+
+    st.progress(
+        (st.session_state.paging_cursor + 1) / total_steps,
+        text=(
+            f"Reference {st.session_state.paging_cursor + 1} "
+            f"of {total_steps}"
+        )
+    )
 
     render_frame_visualization(
         result,
@@ -585,36 +670,57 @@ def render_simulation_tab():
             f"{result['hit_ratio'] * 100:.2f}%"
         )
 
-    st.subheader("Step-by-Step Simulation")
+    if st.session_state.paging_playing:
+        st.caption(
+            "▶ Playing — pause to view the full step table "
+            "and download the PDF report."
+        )
+    else:
+        st.subheader("Step-by-Step Simulation")
 
-    st.dataframe(
-        step_dataframe(
-            result,
-            algorithm_key
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
+        st.dataframe(
+            step_dataframe(
+                result,
+                algorithm_key
+            ),
+            use_container_width=True,
+            hide_index=True
+        )
 
-    pdf_bytes = create_pdf_report(
-        algorithm_key,
-        int(frame_count),
-        parse_ref_string(reference_text),
-        result
-    )
+        pdf_bytes = create_pdf_report(
+            algorithm_key,
+            int(frame_count),
+            parse_ref_string(reference_text),
+            result
+        )
 
-    st.download_button(
-        "Download PDF Report",
-        data=pdf_bytes,
-        file_name="page_replacement_report.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-        key="paging_pdf_download"
-    )
+        st.download_button(
+            "Download PDF Report",
+            data=pdf_bytes,
+            file_name="page_replacement_report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="paging_pdf_download"
+        )
 
+    # Autoplay driver: advance one step, pause briefly so the frame is
+    # visible, then rerun. Stops automatically at the last reference.
+    if st.session_state.paging_playing and not at_last_step:
+        time.sleep(speed_seconds)
+        st.session_state.paging_cursor = min(
+            st.session_state.paging_cursor + 1,
+            total_steps - 1
+        )
+        st.rerun()
 
 def render_compare_tab():
     st.subheader("Algorithm Comparison")
+
+    st.caption(
+        "Run every algorithm on the same reference string and frame "
+        "count, side by side, to see which one causes the fewest page "
+        "faults."
+    )
 
     references_text = st.text_input(
         "Reference string for comparison",
@@ -670,70 +776,361 @@ def render_compare_tab():
         return
 
     results, best = comparison
-    rows = []
 
+    rows = []
     for key in ALGO_ORDER:
         result = results[key]
 
         rows.append(
             {
                 "Algorithm": ALGORITHMS[key]["label"],
+                "Full Name": ALGORITHMS[key]["name"],
                 "Hits": result["hits"],
                 "Faults": result["faults"],
                 "Replacements": result["replacements"],
-                "Hit Ratio": f"{result['hit_ratio'] * 100:.2f}%",
-                "Fault Ratio": f"{result['fault_ratio'] * 100:.2f}%"
+                "Hit Ratio %": round(result["hit_ratio"] * 100, 2),
+                "Fault Ratio %": round(result["fault_ratio"] * 100, 2),
             }
         )
 
-    st.dataframe(
-        pd.DataFrame(rows),
+    df = pd.DataFrame(rows).sort_values(
+        "Faults", kind="stable"
+    ).reset_index(drop=True)
+
+    df.insert(0, "Rank", range(1, len(df) + 1))
+
+    best_label = ALGORITHMS[best]["label"]
+    best_faults = int(df["Faults"].min())
+    worst_faults = int(df["Faults"].max())
+    faults_saved = worst_faults - best_faults
+
+    st.markdown(
+        f"""
+        <div style="
+            background:linear-gradient(90deg,#1e3a37,#20242f);
+            border:1px solid #5FB8B0;
+            border-radius:10px;
+            padding:16px 20px;
+            margin:12px 0;
+        ">
+            <span style="color:#5FB8B0; font-size:22px;">🏆</span>
+            <span style="color:#EDE8DE; font-size:18px; font-weight:bold;">
+                Best for this input: {best_label} — {ALGORITHMS[best]['name']}
+            </span>
+            <br>
+            <span style="color:#9098AC; font-size:14px;">
+                {best_faults} page faults, the fewest of all six algorithms
+                tested on this reference string.
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    metric_left, metric_middle, metric_right = st.columns(3)
+
+    with metric_left:
+        st.metric("Best algorithm", best_label)
+
+    with metric_middle:
+        st.metric("Fewest faults", best_faults)
+
+    with metric_right:
+        st.metric(
+            "Faults saved vs. worst",
+            faults_saved,
+            help=(
+                "Difference between the best and worst performing "
+                "algorithm on this reference string."
+            )
+        )
+
+    display_df = df[
+        [
+            "Rank", "Algorithm", "Full Name", "Hits", "Faults",
+            "Replacements", "Hit Ratio %", "Fault Ratio %",
+        ]
+    ].copy()
+
+    def highlight_best_row(row):
+        is_best = row["Algorithm"] == best_label
+        style = (
+            "background-color:#1e3a37; color:#EDE8DE; font-weight:bold;"
+            if is_best else ""
+        )
+        return [style] * len(row)
+
+    styled = display_df.style.apply(
+        highlight_best_row, axis=1
+    ).format(
+        {"Hit Ratio %": "{:.2f}%", "Fault Ratio %": "{:.2f}%"}
+    ).hide(axis="index")
+
+    st.dataframe(styled, use_container_width=True)
+
+    st.markdown("###### Faults vs. Hits by algorithm")
+
+    max_val = int(max(df["Hits"].max(), df["Faults"].max()))
+    y_ceiling = max_val + max(2, round(max_val * 0.25))
+
+    fault_hit_fig = go.Figure()
+    fault_hit_fig.add_bar(
+        name="Hits",
+        x=df["Algorithm"],
+        y=df["Hits"],
+        marker_color="#5FB8B0",
+        text=df["Hits"],
+        textposition="outside",
+        hovertemplate="%{x}<br>Hits: %{y}<extra></extra>",
+    )
+    fault_hit_fig.add_bar(
+        name="Faults",
+        x=df["Algorithm"],
+        y=df["Faults"],
+        marker_color="#E8A33D",
+        text=df["Faults"],
+        textposition="outside",
+        hovertemplate="%{x}<br>Faults: %{y}<extra></extra>",
+    )
+    fault_hit_fig.update_layout(
+        barmode="group",
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#EDE8DE"),
+        yaxis=dict(
+            range=[0, y_ceiling],
+            fixedrange=True,
+            title="Count",
+            gridcolor="rgba(255,255,255,0.08)",
+        ),
+        xaxis=dict(fixedrange=True, title=None),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1,
+        ),
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=360,
+        bargap=0.3,
+        bargroupgap=0.1,
+    )
+
+    st.plotly_chart(
+        fault_hit_fig,
         use_container_width=True,
-        hide_index=True
+        config={"displayModeBar": False, "scrollZoom": False},
     )
 
-    st.success(
-        f"Best result: "
-        f"{ALGORITHMS[best]['label']} "
-        f"with {results[best]['faults']} page faults."
+    st.markdown("###### Hit ratio by algorithm")
+
+    ratio_fig = go.Figure()
+    ratio_fig.add_bar(
+        x=df["Algorithm"],
+        y=df["Hit Ratio %"],
+        marker_color="#5FB8B0",
+        text=[f"{v:.1f}%" for v in df["Hit Ratio %"]],
+        textposition="outside",
+        hovertemplate="%{x}<br>Hit ratio: %{y:.2f}%<extra></extra>",
+    )
+    ratio_fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#EDE8DE"),
+        yaxis=dict(
+            range=[0, 110],
+            fixedrange=True,
+            title="Hit ratio (%)",
+            gridcolor="rgba(255,255,255,0.08)",
+        ),
+        xaxis=dict(fixedrange=True, title=None),
+        showlegend=False,
+        margin=dict(l=10, r=10, t=20, b=10),
+        height=320,
+        bargap=0.4,
     )
 
+    st.plotly_chart(
+        ratio_fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "scrollZoom": False},
+    )
+
+    st.caption(
+        "Lower Faults and higher Hit Ratio are better for a given "
+        "reference string and frame count. The highlighted row and the "
+        "banner above always show the strongest performer for this "
+        "specific input — results can change with a different reference "
+        "string or number of frames, which is worth trying."
+    )
 
 def render_learn_tab():
     st.subheader("Learn About Page Replacement")
 
+    st.markdown(
+        "New to paging? Start with **Core Concepts** to understand the "
+        "vocabulary, then open **Algorithm Reference** to see how each "
+        "strategy in the Simulate tab actually decides which page to "
+        "evict."
+    )
+
+    st.markdown("#### How this simulator works")
+    st.write(
+        "Every entry in the reference string represents one memory "
+        "access request from a running process, in the order it "
+        "happens. On each request:"
+    )
+    st.markdown(
+        "1. **Check memory** — if the page is already sitting in one of "
+        "the frames, that's a **Hit**, and nothing changes.\n"
+        "2. **Empty frame available** — if the page is missing but a "
+        "frame is still empty, the page is loaded straight in — a "
+        "**Fault**, but no eviction needed.\n"
+        "3. **Memory full** — if the page is missing and every frame is "
+        "occupied, the selected algorithm picks a **victim** page to "
+        "evict, and the new page takes its place — a Fault **with** a "
+        "replacement."
+    )
+    st.write(
+        "The chosen algorithm only changes step 3 — how the victim is "
+        "picked. Everything else about the simulation stays identical, "
+        "which is exactly why the Compare tab can run the same "
+        "reference string through all six algorithms and judge them "
+        "fairly against each other."
+    )
+
+    st.markdown("#### Core Concepts")
+
     topics = {
-        "Page Fault": (
-            "A page fault occurs when a requested page is not "
-            "currently loaded in physical memory."
+        "Virtual Memory": (
+            "Virtual memory lets a process behave as if it has access to "
+            "more memory than physically exists, by keeping only the "
+            "actively-used parts of the process in RAM and the rest on "
+            "disk. Paging is the mechanism that makes this possible."
         ),
-        "Locality of Reference": (
-            "Programs tend to reuse recently accessed pages "
-            "and nearby pages."
+        "Page": (
+            "A page is a fixed-size block of a process's virtual "
+            "memory (its address space). Processes are split into "
+            "equal-sized pages so they can be loaded into physical "
+            "memory piece by piece instead of all at once."
         ),
         "Frame": (
-            "A frame is a fixed-size block of physical memory "
-            "that stores one page."
+            "A frame is a fixed-size block of physical memory (RAM) "
+            "that stores exactly one page. Pages and frames are always "
+            "the same size, so any page can go into any frame."
+        ),
+        "Page Table": (
+            "The page table is the per-process data structure the "
+            "operating system uses to map each virtual page number to "
+            "the physical frame currently holding it. The CPU consults "
+            "it on every memory access to translate a virtual address "
+            "into a physical one."
+        ),
+        "Page Fault": (
+            "A page fault occurs when a requested page is not "
+            "currently loaded in physical memory. The OS must pause the "
+            "process, find or make room in a frame, load the page from "
+            "disk, update the page table, and then resume execution."
+        ),
+        "Page Replacement Algorithm": (
+            "When a page fault happens and memory is already full, a "
+            "page replacement algorithm decides which currently-loaded "
+            "page (the 'victim') gets evicted to make room for the new "
+            "one. FIFO, LRU, OPT, Clock, LFU, and MFU (all available in "
+            "the Simulate tab) are different strategies for making that "
+            "choice."
+        ),
+        "Demand Paging": (
+            "A design where pages are only loaded into memory when they "
+            "are actually referenced for the first time, rather than "
+            "loading a whole process upfront. This is why the very "
+            "first reference to any page is always a fault."
+        ),
+        "Locality of Reference": (
+            "Programs tend to reuse recently accessed pages and pages "
+            "near them (temporal and spatial locality). Most page "
+            "replacement algorithms — especially LRU — are effective "
+            "specifically because real programs exhibit this pattern."
+        ),
+        "Reference Bit": (
+            "A single bit the hardware sets to 1 whenever a page is "
+            "accessed. The Clock algorithm uses this bit to approximate "
+            "LRU cheaply: a page gets a 'second chance' if its bit is "
+            "still 1 when the replacement hand reaches it."
         ),
         "Belady's Anomaly": (
-            "FIFO can sometimes produce more page faults when "
-            "the number of frames is increased."
+            "A counterintuitive result where FIFO can produce *more* "
+            "page faults when given *more* frames for the same "
+            "reference string — the opposite of what you'd expect. LRU "
+            "and OPT never exhibit this because they belong to a class "
+            "called stack algorithms; FIFO does not."
+        ),
+        "Stack Property": (
+            "An algorithm has the stack property if the set of pages it "
+            "keeps in memory with n frames is always a subset of what "
+            "it would keep with n+1 frames. Stack algorithms (like LRU "
+            "and OPT) are immune to Belady's Anomaly; FIFO is not a "
+            "stack algorithm."
         ),
         "Thrashing": (
-            "Thrashing occurs when the operating system spends "
-            "most of its time swapping pages instead of executing."
+            "Thrashing occurs when the operating system spends most of "
+            "its time swapping pages in and out instead of executing "
+            "processes, usually because too many processes are "
+            "competing for too little physical memory. Overall system "
+            "throughput can collapse even though the CPU looks 'busy'."
         ),
         "Working Set": (
             "The working set is the group of pages a process is "
-            "actively using during a period of execution."
+            "actively using during a period of execution. Giving a "
+            "process at least enough frames to hold its working set is "
+            "a common strategy for avoiding thrashing."
+        ),
+        "Hit Ratio / Fault Ratio": (
+            "Hit Ratio = Hits ÷ Total References, and Fault Ratio = "
+            "Faults ÷ Total References (the two always add up to 100%). "
+            "A higher hit ratio means the algorithm and the available "
+            "frames are handling this workload well."
+        ),
+        "Effective Access Time (EAT)": (
+            "A formula used to measure how much page faults slow down "
+            "memory access on average: "
+            "EAT = (1 − fault rate) × memory access time + "
+            "fault rate × page fault service time. Because servicing a "
+            "fault (often a disk read) is thousands of times slower "
+            "than a memory access, even a small fault rate has a large "
+            "impact on EAT."
+        ),
+        "Dirty (Modified) Bit": (
+            "A bit that marks whether a page was written to after being "
+            "loaded. On eviction, a 'clean' page can simply be dropped "
+            "(a copy already exists on disk), while a 'dirty' page must "
+            "be written back to disk first — this simulator focuses on "
+            "fault counts, but the dirty bit is why real systems care "
+            "about *which* page is evicted, not just faults."
         ),
     }
 
-    for title, explanation in topics.items():
-        with st.expander(title):
-            st.write(explanation)
+    topic_items = list(topics.items())
 
-    st.subheader("Algorithm Reference")
+    for i in range(0, len(topic_items), 2):
+        left_col, right_col = st.columns(2)
+        pair = topic_items[i:i + 2]
+
+        for col, (title, explanation) in zip((left_col, right_col), pair):
+            with col:
+                with st.container(border=True):
+                    st.markdown(
+                        f"<span style='color:#5FB8B0; font-weight:700; "
+                        f"font-size:15px;'>{title}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f"<span style='color:#C7CBD9; font-size:14px;'>"
+                        f"{explanation}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+    st.markdown("#### Algorithm Reference")
 
     for key in ALGO_ORDER:
         info = ALGORITHMS[key]
@@ -746,6 +1143,57 @@ def render_learn_tab():
                 f"Time: {info['time']} | "
                 f"Space: {info['space']}"
             )
+
+    st.markdown("#### When to Use Each Algorithm")
+
+    st.write(
+        "Same six strategies, framed around a practical question: given "
+        "a real workload, which one should you reach for?"
+    )
+
+    use_cases = {
+        "FIFO": (
+            "Pick this only when simplicity matters more than "
+            "performance — e.g. constrained embedded systems where a "
+            "plain queue is all the hardware can afford. Avoid it "
+            "whenever page-access patterns actually matter, since it "
+            "ignores usage entirely and can even get *worse* with more "
+            "frames (Belady's Anomaly)."
+        ),
+        "LRU": (
+            "The default choice for most real workloads. It tracks "
+            "recency and rides locality of reference, landing close to "
+            "optimal in practice. The trade-off is bookkeeping cost — "
+            "timestamps or a linked list updated on every access."
+        ),
+        "OPT": (
+            "Use this only as a theoretical benchmark to grade the "
+            "other algorithms against, never in a live system — it "
+            "requires knowing every future reference in advance, which "
+            "no real OS can do."
+        ),
+        "CLOCK": (
+            "The practical stand-in for LRU that real operating systems "
+            "actually ship, because it gets LRU-like quality with far "
+            "less overhead. Reach for this when you want LRU behavior "
+            "without LRU's bookkeeping cost."
+        ),
+        "LFU": (
+            "Effective when a workload has clear 'hot' pages that get "
+            "reused constantly throughout the run. Weak spot: a page "
+            "that was hot early can stay artificially protected long "
+            "after it stops being used."
+        ),
+        "MFU": (
+            "Mainly useful as a teaching contrast — it inverts the "
+            "usual assumption and evicts frequently-used pages instead "
+            "of protecting them. Rarely the right choice for a real "
+            "workload."
+        ),
+    }
+
+    for name, guidance in use_cases.items():
+        st.markdown(f"**{name}** — {guidance}")
 
 
 def aseem():
